@@ -4,7 +4,9 @@ version = "0.0.1"
 
 [dependencies]
 Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "devnet" }
+#Sui = { local = "sui-devnet-0.33.0/crates/sui-framework/packages/sui-framework" }
 
 [addresses]
-swop =  "0x0"
+#swop =  "0x0"
+heyy = "0x0"
 sui = "0000000000000000000000000000000000000000000000000000000000000002"
