@@ -24,12 +24,13 @@ module swop::swop {
     const EInsufficientValue:u64 = 0;
     const EInvalidExpiry: u64 = 1;
     const EInvalidSwapId: u64 = 2;
-    const ENotInitiator: u64 = 3;
-    const ENotCounterparty: u64 = 4;
-    const EActionNotAllowed: u64 = 5;
-    const ESuppliedLengthMismatch: u64 = 6;
-    const EUnexpectedObjectFound: u64 = 7;
-    const ERequestExpired: u64 = 8;
+    const EInvalidOffer: u64 = 3;
+    const ENotInitiator: u64 = 4;
+    const ENotCounterparty: u64 = 5;
+    const EActionNotAllowed: u64 = 6;
+    const ESuppliedLengthMismatch: u64 = 7;
+    const EUnexpectedObjectFound: u64 = 8;
+    const ERequestExpired: u64 = 9;
 
     struct SwapDB has key, store{
         id: UID,
@@ -64,7 +65,30 @@ module swop::swop {
         })
     }
 
-    public fun create(swap_db: &mut SwapDB, counterparty: address, nfts_to_receive: vector<ID>, coins_to_receive: u64, ctx: &mut TxContext){
+    #[test_only]
+    public fun init_test(ctx: &mut TxContext){
+        transfer::share_object(SwapDB{
+            id: object::new(ctx),
+            registry: bag::new(ctx),
+            requests: table::new<address, VecSet<ID>>(ctx)
+        })
+    }
+
+    #[test_only]
+    public fun is_swap_in_requests(initiator: address, swap_id: ID, swap_db: &SwapDB) : bool{
+        let requests = &swap_db.requests;
+        let open_swaps = table::borrow(requests, initiator);
+        vec_set::contains(open_swaps, &swap_id)
+    }
+
+    #[test_only]
+    public fun is_swap_accepted(swap_id: ID, swap_db: &SwapDB) : bool{
+        let registry = &swap_db.registry;
+        let swap = bag::borrow<ID, SwapRequest>(registry, swap_id);
+        swap.status == SWAP_STATUS_ACCEPTED
+    }
+
+    public fun create(swap_db: &mut SwapDB, counterparty: address, nfts_to_receive: vector<ID>, coins_to_receive: u64, ctx: &mut TxContext) : ID {
         let initiator_offer = option::some(
             Offer { owner: tx_context::sender(ctx), escrowed_nfts: bag::new(ctx), escrowed_balance: balance::zero<SUI>() }
         );
@@ -86,6 +110,7 @@ module swop::swop {
         };
         let swap_id = object::id(&swap);
         bag::add(&mut swap_db.registry, swap_id, swap);
+        swap_id
     }
 
     public entry fun add_nft_to_offer<T: key+store>(swap_db: &mut SwapDB, swap_id: ID, nft: T, ctx: &mut TxContext){
@@ -152,19 +177,28 @@ module swop::swop {
         // TODO: emit events later on
     }
 
-    public fun publish(swap_db: &mut SwapDB, swap: SwapRequest , clock: &Clock, expiry:u64, ctx: &mut TxContext){
-        assert!(expiry > clock::timestamp_ms(clock), EInvalidExpiry);
 
+    fun is_offer_empty(offer: &Offer) : bool{
+        balance::value(&offer.escrowed_balance) == 0 &&
+        bag::is_empty(&offer.escrowed_nfts)
+    }
+
+    public fun publish(swap_db: &mut SwapDB, swap_id: ID, clock: &Clock, valid_for:u64, ctx: &mut TxContext){
         let sender = tx_context::sender(ctx);
         let registry = &mut swap_db.registry;
         let requests = &mut swap_db.requests;
 
-        // Add swap to registry
-        let swap_id = object::id(&swap);
-        let swap_mut = &mut swap;
+        let swap_mut = bag::borrow_mut<ID, SwapRequest>(registry, swap_id);
+
+        // Makes sure initiator offer and counterparty offer requested are not empty
+        assert!(
+            !is_offer_empty(option::borrow(&swap_mut.initiator_offer)) &&
+            (!vec_set::is_empty(&swap_mut.nfts_to_receive) || swap_mut.coins_to_receive > 0),
+            EInvalidOffer
+        );
+
         swap_mut.status = SWAP_STATUS_PENDING;
-        swap_mut.expiry = clock::timestamp_ms(clock) + 604800000; // 604800000 should be 7 days in ms
-        bag::add(registry, swap_id, swap);
+        swap_mut.expiry = clock::timestamp_ms(clock) + valid_for;
 
         // Add swap to open requests
         if(table::contains(requests, sender)){
@@ -193,7 +227,7 @@ module swop::swop {
         coin::take(&mut swap_mut.platform_fee, platform_fee_value, ctx)
     }
 
-    public fun claim_nft<T: key+store>(swap_db: &mut SwapDB, swap_id: ID, item_key: u8, ctx: &mut TxContext): (T, address) {
+    public fun claim_nft<T: key+store>(swap_db: &mut SwapDB, swap_id: ID, item_key: u64, ctx: &mut TxContext): (T, address) {
         let registry = &mut swap_db.registry;
         let swap_mut = bag::borrow_mut<ID, SwapRequest>(registry, swap_id);
         let sender = tx_context::sender(ctx);
@@ -202,11 +236,20 @@ module swop::swop {
 
         let (offer, recipient) = {
             if(swap_mut.status == SWAP_STATUS_ACCEPTED) {
-                (option::borrow_mut(&mut swap_mut.counterparty_offer), swap_mut.counterparty)
+                if(sender == swap_mut.counterparty){
+                    (option::borrow_mut(&mut swap_mut.initiator_offer), swap_mut.initiator)
+                } else {
+                    (option::borrow_mut(&mut swap_mut.counterparty_offer), swap_mut.counterparty)
+                }
             } else {
-                (option::borrow_mut(&mut swap_mut.initiator_offer), swap_mut.initiator)
+                if(sender == swap_mut.counterparty){
+                    (option::borrow_mut(&mut swap_mut.counterparty_offer), swap_mut.counterparty)
+                } else {
+                    (option::borrow_mut(&mut swap_mut.initiator_offer), swap_mut.initiator)
+                }
             }
         };
+
         (bag::remove(&mut offer.escrowed_nfts, item_key), recipient)
     }
 
@@ -218,9 +261,17 @@ module swop::swop {
             (sender == swap_mut.counterparty || sender == swap_mut.initiator), EActionNotAllowed);
         let (offer, recipient) = {
             if(swap_mut.status == SWAP_STATUS_ACCEPTED) {
-                (option::borrow_mut(&mut swap_mut.counterparty_offer), swap_mut.counterparty)
+                if(sender == swap_mut.counterparty){
+                    (option::borrow_mut(&mut swap_mut.initiator_offer), swap_mut.initiator)
+                } else {
+                    (option::borrow_mut(&mut swap_mut.counterparty_offer), swap_mut.counterparty)
+                }
             } else {
-                (option::borrow_mut(&mut swap_mut.initiator_offer), swap_mut.initiator)
+                if(sender == swap_mut.counterparty){
+                    (option::borrow_mut(&mut swap_mut.counterparty_offer), swap_mut.counterparty)
+                } else {
+                    (option::borrow_mut(&mut swap_mut.initiator_offer), swap_mut.initiator)
+                }
             }
         };
 
@@ -230,12 +281,13 @@ module swop::swop {
         (coin::take(&mut offer.escrowed_balance, current_balance, ctx), recipient)
     }
 
-    public fun accept(swap_id: ID, swap_db: &mut SwapDB, clock: &Clock){
+    public fun accept(swap_db: &mut SwapDB, swap_id: ID, clock: &Clock){
         let registry = &mut swap_db.registry;
         let swap_mut = bag::borrow_mut<ID, SwapRequest>(registry, swap_id);
 
         // Check if request is still valid
-        assert!(clock::timestamp_ms(clock) > swap_mut.expiry, ERequestExpired);
+
+        assert!(clock::timestamp_ms(clock) < swap_mut.expiry, ERequestExpired);
         assert!(swap_mut.status == SWAP_STATUS_PENDING, EActionNotAllowed);
 
         // Check if coins and nfts supplied by counterparty matches swap terms
@@ -244,6 +296,10 @@ module swop::swop {
         assert!(bag::length(&counterparty_offer.escrowed_nfts) == vec_set::size(&swap_mut.nfts_to_receive), ESuppliedLengthMismatch);
 
         swap_mut.status = SWAP_STATUS_ACCEPTED;
+
+        // Remove swap_id from requests
+        let open_swaps = table::borrow_mut(&mut swap_db.requests, swap_mut.initiator);
+        vec_set::remove(open_swaps, &swap_id);
     }
 
     public fun take_swop_fee(coin: Coin<SUI>, swap_id: ID, swap_db: &mut SwapDB){
