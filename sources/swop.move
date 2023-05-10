@@ -152,6 +152,11 @@ module swop::swop {
         let swap = bag::borrow_mut<ID, SwapRequest>(&mut swap_db.registry, swap_id);
         let sender = tx_context::sender(ctx);
 
+        assert!(
+            (swap.status == SWAP_STATUS_INACTIVE || swap.status == SWAP_STATUS_PENDING) &&
+                (sender == swap.initiator || sender == swap.counterparty), EActionNotAllowed
+        );
+
         if(sender == swap.counterparty){
             // Check if status is pending
             // Counterparty can add nft to offer only if it is pending
@@ -161,8 +166,6 @@ module swop::swop {
             // Initiator can add nft to offer only if it is inactive
             assert!(swap.status == SWAP_STATUS_INACTIVE, EActionNotAllowed);
         };
-
-        assert!((swap.status == SWAP_STATUS_INACTIVE) && (sender == swap.initiator || sender == swap.counterparty), EActionNotAllowed);
 
         let offer = {
             if (swap.counterparty == sender) {
@@ -237,9 +240,9 @@ module swop::swop {
         let (offer, recipient) = {
             if(swap_mut.status == SWAP_STATUS_ACCEPTED) {
                 if(sender == swap_mut.counterparty){
-                    (option::borrow_mut(&mut swap_mut.initiator_offer), swap_mut.initiator)
+                    (option::borrow_mut(&mut swap_mut.initiator_offer), swap_mut.counterparty)
                 } else {
-                    (option::borrow_mut(&mut swap_mut.counterparty_offer), swap_mut.counterparty)
+                    (option::borrow_mut(&mut swap_mut.counterparty_offer), swap_mut.initiator)
                 }
             } else {
                 if(sender == swap_mut.counterparty){
@@ -257,14 +260,20 @@ module swop::swop {
         let registry = &mut swap_db.registry;
         let swap_mut = bag::borrow_mut<ID, SwapRequest>(registry, swap_id);
         let sender = tx_context::sender(ctx);
+
         assert!((swap_mut.status == SWAP_STATUS_ACCEPTED || swap_mut.status == SWAP_STATUS_CANCELLED || swap_mut.status == SWAP_STATUS_REJECTED || swap_mut.status == SWAP_STATUS_EXPIRED) &&
             (sender == swap_mut.counterparty || sender == swap_mut.initiator), EActionNotAllowed);
         let (offer, recipient) = {
             if(swap_mut.status == SWAP_STATUS_ACCEPTED) {
+                // std::debug::print(&sender);
+                // std::debug::print(&b"00000000");
+                // std::debug::print(&swap_mut.initiator);
+                // std::debug::print(&b"00000000");
+                // std::debug::print(&swap_mut.counterparty);
                 if(sender == swap_mut.counterparty){
-                    (option::borrow_mut(&mut swap_mut.initiator_offer), swap_mut.initiator)
+                    (option::borrow_mut(&mut swap_mut.initiator_offer), swap_mut.counterparty)
                 } else {
-                    (option::borrow_mut(&mut swap_mut.counterparty_offer), swap_mut.counterparty)
+                    (option::borrow_mut(&mut swap_mut.counterparty_offer), swap_mut.initiator)
                 }
             } else {
                 if(sender == swap_mut.counterparty){
