@@ -1,4 +1,4 @@
-module heyy::my_module{
+module swop::my_module{
     use sui::tx_context::{Self, TxContext};
     use sui::object::{Self, UID};
     use sui::transfer::{Self};
