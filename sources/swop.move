@@ -8,13 +8,12 @@ module swop::swop {
     use sui::tx_context::{Self, TxContext};
     use sui::transfer::{Self};
     use std::option::{Self, Option};
-    // use std::vector::{Self};
     use swop::vec_set::{Self, VecSet};
     use sui::coin::{Self, Coin};
     use sui::clock::{Self, Clock};
     use std::type_name::{Self};
     use sui::dynamic_field::{Self as field};
-    // use std::ascii
+    friend swop::admin;
 
     const SWAP_STATUS_PENDING: u64 = 100;
     const SWAP_STATUS_ACCEPTED: u64 = 101;
@@ -44,20 +43,16 @@ module swop::swop {
     const ESuppliedLengthMismatch: u64 = 408;
     const EUnexpectedObjectFound: u64 = 409;
     const ERequestExpired: u64 = 410;
-    const EProjectAlreadyRegistered: u64 = 411;
-    const ECoinTypeAlreadyRegistered: u64 = 412;
     const ECoinAlreadyAddedToOffer: u64 = 413;
-
-    struct AdminCap has key {
-        id: UID,
-    }
+    const ECoinNotAllowed: u64 = 414;
+    const EProjectNotAllowed: u64 = 415;
 
     struct SwapDB has key, store {
         id: UID,
         registry: Bag,
         requests: Table<address, VecSet<ID>>,
         allowed_projects: UID,
-        allowed_coin_types: UID,
+        allowed_coins: UID,
         platform_fee: u64,
     }
 
@@ -88,40 +83,42 @@ module swop::swop {
     }
 
     fun init(ctx: &mut TxContext) {
-        let admin_cap = AdminCap {
-            id: object::new(ctx),
-        };
-
         let swap_db = SwapDB {
             id: object::new(ctx),
             registry: bag::new(ctx),
             requests: table::new<address, VecSet<ID>>(ctx),
             allowed_projects: object::new(ctx),
-            allowed_coin_types: object::new(ctx),
+            allowed_coins: object::new(ctx),
             platform_fee: 0
         };
 
-        register_coin_type<SUI>(&admin_cap, &mut swap_db);
-
-        transfer::transfer(admin_cap, tx_context::sender(ctx));
         transfer::share_object(swap_db);
     }
 
-    public entry fun register_project<T>(_: &AdminCap, swap_db: &mut SwapDB) {
-        let type_name = type_name::into_string(type_name::get<T>());
-        assert!(!field::exists_(&swap_db.allowed_projects, type_name), EProjectAlreadyRegistered);
-        field::add(&mut swap_db.allowed_projects, type_name, true);
+    public(friend) fun borrow_mut_allowed_projects(swap_db: &mut SwapDB): &mut UID {
+        &mut swap_db.allowed_projects
     }
 
-    public entry fun register_coin_type<T>(_: &AdminCap, swap_db: &mut SwapDB) {
-        let type_name = type_name::into_string(type_name::get<T>());
-        assert!(!field::exists_(&swap_db.allowed_coin_types, type_name), ECoinTypeAlreadyRegistered);
-        field::add(&mut swap_db.allowed_coin_types, type_name, true);
+    public(friend) fun borrow_mut_allowed_coins(swap_db: &mut SwapDB): &mut UID {
+        &mut swap_db.allowed_coins
     }
 
-    public entry fun update_platform_fee(_: &AdminCap, swap_db: &mut SwapDB, new_platform_fee: u64) {
-        swap_db.platform_fee = new_platform_fee;
+    public(friend) fun borrow_mut_platform_fee(swap_db: &mut SwapDB): &mut u64 {
+        &mut swap_db.platform_fee
     }
+
+    public(friend) fun borrow_mut_registry(swap_db: &mut SwapDB): &mut Bag {
+        &mut swap_db.registry
+    }
+
+    public(friend) fun borrow_mut_sr_balance(swap: &mut SwapRequest): &mut Balance<SUI> {
+        &mut swap.platform_fee_balance
+    }
+
+    public(friend) fun borrow_mut_sr_status(swap: &mut SwapRequest): &mut u64 {
+        &mut swap.status
+    }
+
 
     public fun create(
         swap_db: &mut SwapDB,
@@ -170,15 +167,17 @@ module swop::swop {
         receipt: Receipt,
         ctx: &mut TxContext
     ): Receipt {
-        let swap = bag::borrow_mut<ID, SwapRequest>(&mut swap_db.registry, swap_id);
-        let sender = tx_context::sender(ctx);
-
         assert!(receipt.swap_id == swap_id, EInvalidSwapId);
         assert!(
             (receipt.tx_type == TX_TYPE_CREATE || receipt.tx_type == TX_TYPE_ACCEPT) &&
                 (receipt.tx_step == TX_STEP_START || receipt.tx_step == TX_STEP_ADD),
             EInvalidSequence
         );
+        let type_name = type_name::into_string(type_name::get<T>());
+        assert!(field::exists_(&swap_db.allowed_projects, type_name), EProjectNotAllowed);
+
+        let swap = bag::borrow_mut<ID, SwapRequest>(&mut swap_db.registry, swap_id);
+        let sender = tx_context::sender(ctx);
 
         assert!(
             swap.status == SWAP_STATUS_PENDING && (sender == swap.counterparty || sender == swap.initiator),
@@ -208,9 +207,6 @@ module swop::swop {
         receipt: Receipt,
         ctx: &mut TxContext
     ): Receipt {
-        let swap = bag::borrow_mut<ID, SwapRequest>(&mut swap_db.registry, swap_id);
-        let sender = tx_context::sender(ctx);
-
         assert!(receipt.swap_id == swap_id, EInvalidSwapId);
         assert!(
             (receipt.tx_type == TX_TYPE_CREATE || receipt.tx_type == TX_TYPE_ACCEPT) &&
@@ -218,16 +214,19 @@ module swop::swop {
             EInvalidSequence
         );
 
+        let swap_mut = bag::borrow_mut<ID, SwapRequest>(&mut swap_db.registry, swap_id);
+        let sender = tx_context::sender(ctx);
+
         assert!(
-            swap.status == SWAP_STATUS_PENDING && (sender == swap.counterparty || sender == swap.initiator),
+            swap_mut.status == SWAP_STATUS_PENDING && (sender == swap_mut.counterparty || sender == swap_mut.initiator),
             EActionNotAllowed
         );
 
         let offer = {
-            if (swap.counterparty == sender) {
-                option::borrow_mut(&mut swap.counterparty_offer)
+            if (swap_mut.counterparty == sender) {
+                option::borrow_mut(&mut swap_mut.counterparty_offer)
             } else {
-                option::borrow_mut(&mut swap.initiator_offer)
+                option::borrow_mut(&mut swap_mut.initiator_offer)
             }
         };
 
@@ -243,12 +242,6 @@ module swop::swop {
         receipt
     }
 
-
-    fun is_offer_empty(offer: &Offer): bool {
-        balance::value(&offer.escrowed_balance) == 0 &&
-            bag::is_empty(&offer.escrowed_nfts)
-    }
-
     public fun publish(
         swap_db: &mut SwapDB,
         swap_id: ID,
@@ -257,13 +250,12 @@ module swop::swop {
         receipt: Receipt,
         ctx: &mut TxContext
     ): Receipt {
-        let sender = tx_context::sender(ctx);
-        let registry = &mut swap_db.registry;
-        let requests = &mut swap_db.requests;
-        let swap_mut = bag::borrow_mut<ID, SwapRequest>(registry, swap_id);
-
         assert!((receipt.tx_type == TX_TYPE_CREATE && receipt.tx_step == TX_STEP_ADD), EInvalidSequence);
         assert!(swap_id == receipt.swap_id, EInvalidSwapId);
+
+        let sender = tx_context::sender(ctx);
+        let requests = &mut swap_db.requests;
+        let swap_mut = bag::borrow_mut<ID, SwapRequest>(&mut swap_db.registry, swap_id);
 
         // Makes sure initiator offer and counterparty offer requested are not empty
         assert!(
@@ -330,9 +322,7 @@ module swop::swop {
         assert!(swap_id == receipt.swap_id, EInvalidSwapId);
 
         let Receipt { swap_id: _, tx_type: _, tx_step: _, platform_fee_to_pay: _ } = receipt;
-
-        let registry = &mut swap_db.registry;
-        let swap_mut: &mut SwapRequest = bag::borrow_mut(registry, swap_id);
+        let swap_mut: &mut SwapRequest = bag::borrow_mut(&mut swap_db.registry, swap_id);
         // Refund initial swop fee paid
         let platform_fee_value = balance::value(&swap_mut.platform_fee_balance);
         coin::take(&mut swap_mut.platform_fee_balance, platform_fee_value, ctx)
@@ -469,22 +459,15 @@ module swop::swop {
 
     #[test_only]
     public fun init_test(ctx: &mut TxContext) {
-        let admin_cap = AdminCap {
-            id: object::new(ctx),
-        };
-
         let swap_db = SwapDB {
             id: object::new(ctx),
             registry: bag::new(ctx),
             requests: table::new<address, VecSet<ID>>(ctx),
             allowed_projects: object::new(ctx),
-            allowed_coin_types: object::new(ctx),
+            allowed_coins: object::new(ctx),
             platform_fee: 0
         };
 
-        register_coin_type<SUI>(&admin_cap, &mut swap_db);
-
-        transfer::transfer(admin_cap, tx_context::sender(ctx));
         transfer::share_object(swap_db);
     }
 
