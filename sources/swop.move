@@ -1,6 +1,7 @@
 module swop::swop {
     use std::type_name::{Self};
     use std::vector::{Self};
+    use std::ascii::{String};
     use sui::bag::{Self, Bag};
     use sui::object::{Self, UID, ID};
     use sui::table::{Self, Table};
@@ -56,6 +57,7 @@ module swop::swop {
         counterparty: address,
         nfts_to_receive: VecSet<ID>,
         coins_to_receive: u64,
+        coin_type_to_receive: String,
         initiator_offer: Option<Offer>,
         counterparty_offer: Option<Offer>,
         status: u64,
@@ -66,7 +68,7 @@ module swop::swop {
     struct Offer has store {
         owner: address,
         escrowed_nfts: Bag,
-        escrowed_balance: Balance<SUI>,
+        escrowed_balance_wrapper: UID,
     }
 
     struct Receipt {
@@ -93,14 +95,15 @@ module swop::swop {
         counterparty: address,
         nfts_to_receive: vector<ID>,
         coins_to_receive: u64,
+        coin_type_to_receive: String,
         ctx: &mut TxContext
     ): ID {
         let initiator = tx_context::sender(ctx);
         let initiator_offer = option::some(
-            Offer { owner: initiator, escrowed_nfts: bag::new(ctx), escrowed_balance: balance::zero<SUI>() }
+            Offer { owner: initiator, escrowed_nfts: bag::new(ctx), escrowed_balance_wrapper: object::new(ctx) }
         );
         let counterparty_offer = option::some(
-            Offer { owner: counterparty, escrowed_nfts: bag::new(ctx), escrowed_balance: balance::zero<SUI>() }
+            Offer { owner: counterparty, escrowed_nfts: bag::new(ctx), escrowed_balance_wrapper: object::new(ctx) }
         );
 
         assert!(initiator != counterparty, EActionNotAllowed);
@@ -112,6 +115,7 @@ module swop::swop {
             counterparty,
             nfts_to_receive: vec_set::from_keys(nfts_to_receive),
             coins_to_receive,
+            coin_type_to_receive,
             initiator_offer,
             counterparty_offer,
             status: SWAP_STATUS_PENDING_INITIATOR,
@@ -138,19 +142,22 @@ module swop::swop {
 
         let offer = {
             if (swap_mut.counterparty == sender) {
+                assert!(vec_set::contains(&swap_mut.nfts_to_receive, object::borrow_id(&nft)), 0);
                 option::borrow_mut(&mut swap_mut.counterparty_offer)
             } else {
                 option::borrow_mut(&mut swap_mut.initiator_offer)
             }
         };
-
         let escrowed_nft_len = bag::length(&offer.escrowed_nfts);
         bag::add(&mut offer.escrowed_nfts, escrowed_nft_len, nft);
-
-        // TODO: emit events later on
     }
 
-    public fun add_coins_to_offer(swap_db: &mut SwapDB, swap_id: ID, coins: Coin<SUI>, ctx: &mut TxContext) {
+    public fun add_coins_to_offer<CoinType>(
+        swap_db: &mut SwapDB,
+        swap_id: ID,
+        coins: Coin<CoinType>,
+        ctx: &mut TxContext
+    ) {
         let swap_mut = bag::borrow_mut<ID, SwapRequest>(&mut swap_db.registry, swap_id);
         let sender = tx_context::sender(ctx);
 
@@ -160,25 +167,39 @@ module swop::swop {
             EActionNotAllowed
         );
 
+
+        let type_name = type_name::into_string(type_name::get<CoinType>());
+
         let offer = {
             if (swap_mut.counterparty == sender) {
+                assert!(swap_mut.coins_to_receive == coin::value(&coins), EInsufficientValue);
+                assert!(
+                    type_name == swap_mut.coin_type_to_receive,
+                    ECoinNotAllowed
+                ); // need to change it to cmp_u8_vector
                 option::borrow_mut(&mut swap_mut.counterparty_offer)
             } else {
+                assert!(field::exists_(&swap_db.allowed_coins, type_name), ECoinNotAllowed);
                 option::borrow_mut(&mut swap_mut.initiator_offer)
             }
         };
 
-        // Coin can be added at most once
-        assert!(balance::value(&offer.escrowed_balance) == 0, ECoinAlreadyAddedToOffer);
-        coin::put(&mut offer.escrowed_balance, coins);
+        let escrowed_balance: &mut Balance<CoinType> = field::borrow_mut(
+            &mut offer.escrowed_balance_wrapper,
+            type_name
+        );
+        assert!(balance::value(escrowed_balance) == 0, ECoinAlreadyAddedToOffer);
+        coin::put(escrowed_balance, coins);
         // TODO: emit events later on
     }
 
-    fun is_offer_empty(offer: &Offer): bool {
-        balance::value(&offer.escrowed_balance) == 0 && bag::is_empty(&offer.escrowed_nfts)
+    fun is_offer_empty<CoinType>(offer: &Offer): bool {
+        let type_name = type_name::into_string(type_name::get<CoinType>());
+        let escrowed_balance: &Balance<CoinType> = field::borrow(&offer.escrowed_balance_wrapper, type_name);
+        balance::value(escrowed_balance) == 0 && bag::is_empty(&offer.escrowed_nfts)
     }
 
-    public fun create(
+    public fun create<CoinType>(
         swap_db: &mut SwapDB,
         swap_id: ID,
         clock: &Clock,
@@ -190,7 +211,7 @@ module swop::swop {
 
         assert!(sender == swap_mut.initiator, EActionNotAllowed);
         // Makes sure initiator offer and counterparty offer requested are not empty
-        assert!((is_offer_empty(option::borrow(&swap_mut.initiator_offer))), EInvalidOffer);
+        assert!((is_offer_empty<CoinType>(option::borrow(&swap_mut.initiator_offer))), EInvalidOffer);
 
         swap_mut.expiry = clock::timestamp_ms(clock) + valid_for;
         swap_mut.status = SWAP_STATUS_PENDING_COUNTERPARTY;
@@ -289,11 +310,11 @@ module swop::swop {
         bag::remove(&mut offer.escrowed_nfts, item_key)
     }
 
-    public fun claim_coins(
+    public fun claim_coins<CoinType>(
         swap_db: &mut SwapDB,
         swap_id: ID,
         ctx: &mut TxContext
-    ): Coin<SUI> {
+    ): Coin<CoinType> {
         let registry = &mut swap_db.registry;
         let swap_mut = bag::borrow_mut<ID, SwapRequest>(registry, swap_id);
         let sender = tx_context::sender(ctx);
@@ -316,13 +337,17 @@ module swop::swop {
             }
         };
 
-        let current_balance = balance::value(&offer.escrowed_balance);
+        let type_name = type_name::into_string(type_name::get<CoinType>());
+        let escrowed_balance_wrapper: &mut Balance<CoinType> = field::borrow_mut(
+            &mut offer.escrowed_balance_wrapper,
+            type_name
+        );
+        let current_balance = balance::value(escrowed_balance_wrapper);
         assert!(current_balance > 0, EInsufficientValue);
-
-        coin::take(&mut offer.escrowed_balance, current_balance, ctx)
+        coin::take(escrowed_balance_wrapper, current_balance, ctx)
     }
 
-    public fun accept(swap_db: &mut SwapDB, swap_id: ID, ctx: &mut TxContext): Receipt {
+    public fun accept<CoinType>(swap_db: &mut SwapDB, swap_id: ID, ctx: &mut TxContext): Receipt {
         let registry = &mut swap_db.registry;
         let swap_mut = bag::borrow_mut<ID, SwapRequest>(registry, swap_id);
         let sender = tx_context::sender(ctx);
@@ -331,7 +356,10 @@ module swop::swop {
 
         // Check if coins and nfts supplied by counterparty matches swap terms
         let offer = option::borrow(&swap_mut.counterparty_offer);
-        assert!(balance::value(&offer.escrowed_balance) == swap_mut.coins_to_receive, EInsufficientValue);
+
+        let type_name = type_name::into_string(type_name::get<CoinType>());
+        let escrowed_balance: &Balance<CoinType> = field::borrow(&offer.escrowed_balance_wrapper, type_name);
+        assert!(balance::value(escrowed_balance) == swap_mut.coins_to_receive, EInsufficientValue);
         assert!(bag::length(&offer.escrowed_nfts) == vec_set::size(&swap_mut.nfts_to_receive), ESuppliedLengthMismatch);
 
         swap_mut.status = SWAP_STATUS_ACCEPTED;
