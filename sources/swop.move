@@ -342,9 +342,14 @@ module swop::swop {
         coin::take(escrowed_balance_wrapper, current_balance, ctx)
     }
 
-    public fun accept<CoinType>(swap_db: &mut SwapDB, swap: &mut SwapRequest, ctx: &mut TxContext): Receipt {
+    public fun accept<CoinType>(
+        swap_db: &mut SwapDB,
+        swap: &mut SwapRequest,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ): Receipt {
         let sender = tx_context::sender(ctx);
-
+        assert!(clock::timestamp_ms(clock) > swap.expiry, ERequestExpired);
         assert!((sender == swap.counterparty && swap.status == SWAP_STATUS_PENDING_COUNTERPARTY), EActionNotAllowed);
         // Check if coins and nfts supplied by counterparty matches swap terms
         let offer = option::borrow(&swap.counterparty_offer);
