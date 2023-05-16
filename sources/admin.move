@@ -2,13 +2,12 @@ module swop::admin {
     use std::type_name::{Self};
     use sui::dynamic_field::{Self as field};
     use sui::transfer::{Self};
-    use sui::object::{Self, UID, ID};
-    use sui::bag::{Self};
+    use sui::object::{Self, UID};
     use sui::coin::{Self, Coin};
     use sui::sui::{SUI};
     use sui::balance::{Self};
     use sui::tx_context::{Self, TxContext};
-    use swop::swop::{Self, SwapDB};
+    use swop::swop::{Self, SwapDB, SwapRequest};
 
     const EInvalidSwapId: u64 = 400;
     const EProjectAlreadyRegistered: u64 = 401;
@@ -52,14 +51,9 @@ module swop::admin {
 
     public fun take_platform_fee(
         _: &AdminCap,
-        swap_db: &mut SwapDB,
-        swap_id: ID,
+        swap: &mut SwapRequest,
         ctx: &mut TxContext
     ): Coin<SUI> {
-        let registry = swop::borrow_mut_registry(swap_db);
-        assert!(bag::contains(registry, swap_id), EInvalidSwapId);
-
-        let swap = bag::borrow_mut(registry, swap_id);
         let status = swop::borrow_mut_sr_status(swap);
         assert!(*status == SWAP_STATUS_ACCEPTED, EActionNotAllowed);
         *status = SWAP_STATUS_COMPLETED;
