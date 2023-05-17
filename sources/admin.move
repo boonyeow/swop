@@ -10,12 +10,11 @@ module swop::admin {
     use sui::tx_context::{Self, TxContext};
     use swop::swop::{Self, SwapDB, SwapRequest};
 
-    const EInvalidSwapId: u64 = 400;
-    const EProjectAlreadyRegistered: u64 = 401;
-    const ECoinTypeAlreadyRegistered: u64 = 402;
-    const EProjectNotFound: u64 = 403;
-    const ECoinTypeNotFound: u64 = 404;
-    const EActionNotAllowed: u64 = 405;
+    const EProjectAlreadyRegistered: u64 = 400;
+    const ECoinTypeAlreadyRegistered: u64 = 401;
+    const EProjectNotFound: u64 = 402;
+    const ECoinTypeNotFound: u64 = 403;
+    const EActionNotAllowed: u64 = 404;
 
     const SWAP_STATUS_ACCEPTED: u64 = 100;
     const SWAP_STATUS_COMPLETED: u64 = 101;

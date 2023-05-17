@@ -13,35 +13,31 @@ module swop::swop {
     use sui::clock::{Self, Clock};
     use sui::dynamic_field::{Self as field};
     use swop::vec_set::{Self, VecSet};
-    #[test_only]
-    use std::ascii::string;
     friend swop::admin;
+
+    const VERSION: u64 = 1;
 
     const SWAP_STATUS_PENDING_INITIATOR: u64 = 100;
     const SWAP_STATUS_PENDING_COUNTERPARTY: u64 = 101;
     const SWAP_STATUS_ACCEPTED: u64 = 102;
-    const SWAP_STATUS_REJECTED: u64 = 103;
-    const SWAP_STATUS_CANCELLED: u64 = 104;
-    const SWAP_STATUS_EXPIRED: u64 = 105;
+    const SWAP_STATUS_CANCELLED: u64 = 103;
+    const SWAP_STATUS_EXPIRED: u64 = 104;
 
     const TX_TYPE_CREATE: u64 = 200;
     const TX_TYPE_ACCEPT: u64 = 201;
     const TX_TYPE_CANCEL: u64 = 202;
 
     const EInsufficientValue: u64 = 400;
-    const EInvalidExpiry: u64 = 401;
-    const EInvalidSwapId: u64 = 402;
-    const EInvalidOffer: u64 = 403;
-    const ENotInitiator: u64 = 404;
-    const EInvalidSequence: u64 = 405;
-    const ENotCounterparty: u64 = 406;
-    const EActionNotAllowed: u64 = 407;
-    const ESuppliedLengthMismatch: u64 = 408;
-    const EUnexpectedObjectFound: u64 = 409;
-    const ERequestExpired: u64 = 410;
-    const ECoinAlreadyAddedToOffer: u64 = 413;
-    const ECoinNotAllowed: u64 = 414;
-    const EProjectNotAllowed: u64 = 415;
+    const EInvalidSwapId: u64 = 401;
+    const EInvalidOffer: u64 = 402;
+    const EInvalidSequence: u64 = 403;
+    const EActionNotAllowed: u64 = 404;
+    const ESuppliedLengthMismatch: u64 = 405;
+    const ERequestExpired: u64 = 406;
+    const ECoinAlreadyAddedToOffer: u64 = 407;
+    const ECoinNotAllowed: u64 = 408;
+    const EProjectNotAllowed: u64 = 409;
+    const EWrongVersion: u64 = 410;
 
     const SWAP_INITIATOR: u8 = 0;
     const SWAP_COUNTERPARTY: u8 = 1;
@@ -53,6 +49,7 @@ module swop::swop {
         allowed_projects: UID,
         allowed_coins: UID,
         platform_fee: u64,
+        version: u64,
     }
 
     struct SwapRequest has key, store {
@@ -66,7 +63,8 @@ module swop::swop {
         counterparty_offer: Offer,
         status: u64,
         expiry: u64,
-        platform_fee_balance: Balance<SUI>
+        platform_fee_balance: Balance<SUI>,
+        version: u64
     }
 
     struct Offer has store {
@@ -88,7 +86,8 @@ module swop::swop {
             requests: table::new<address, VecSet<ID>>(ctx),
             allowed_projects: object::new(ctx),
             allowed_coins: object::new(ctx),
-            platform_fee: 0
+            platform_fee: 0,
+            version: VERSION
         };
 
         let type_name = type_name::into_string(type_name::get<SUI>());
@@ -104,6 +103,7 @@ module swop::swop {
         coin_type_to_receive: String,
         ctx: &mut TxContext
     ): ID {
+        assert!(swap_db.version == VERSION, EWrongVersion);
         assert!((!vector::is_empty(&nfts_to_receive) || coins_to_receive > 0), EInvalidOffer);
         assert!(field::exists_(&swap_db.allowed_coins, coin_type_to_receive), ECoinNotAllowed);
 
@@ -128,7 +128,8 @@ module swop::swop {
             counterparty_offer,
             status: SWAP_STATUS_PENDING_INITIATOR,
             expiry: 0,
-            platform_fee_balance: balance::zero()
+            platform_fee_balance: balance::zero(),
+            version: VERSION
         };
         let swap_id = object::id(&swap);
         transfer::share_object(swap);
@@ -153,6 +154,7 @@ module swop::swop {
     }
 
     public fun add_nft_to_offer<T: key+store>(swap_db: &SwapDB, swap: &mut SwapRequest, nft: T, ctx: &mut TxContext) {
+        assert!(swap_db.version == VERSION && swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
         assert!(
             (swap.status == SWAP_STATUS_PENDING_INITIATOR && sender == swap.initiator) ||
@@ -182,6 +184,7 @@ module swop::swop {
         coins: Coin<CoinType>,
         ctx: &mut TxContext
     ) {
+        assert!(swap_db.version == VERSION && swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
         assert!(
             (swap.status == SWAP_STATUS_PENDING_INITIATOR && sender == swap.initiator) ||
@@ -231,6 +234,7 @@ module swop::swop {
         valid_for: u64,
         ctx: &mut TxContext
     ): Receipt {
+        assert!(swap_db.version == VERSION && swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
 
         assert!(sender == swap.initiator, EActionNotAllowed);
@@ -263,6 +267,7 @@ module swop::swop {
         clock: &Clock,
         ctx: &mut TxContext
     ): Receipt {
+        assert!(swap_db.version == VERSION && swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
         assert!(swap.initiator == sender && swap.status == SWAP_STATUS_PENDING_INITIATOR, EActionNotAllowed);
 
@@ -287,6 +292,7 @@ module swop::swop {
     }
 
     public fun refund_platform_fee(swap: &mut SwapRequest, receipt: Receipt, ctx: &mut TxContext): Coin<SUI> {
+        assert!(swap.version == VERSION, EWrongVersion);
         let swap_id = object::id(swap);
         let sender = tx_context::sender(ctx);
 
@@ -300,6 +306,7 @@ module swop::swop {
     }
 
     public fun claim_nft_from_offer<T: key+store>(swap: &mut SwapRequest, item_key: u64, ctx: &mut TxContext): T {
+        assert!(swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
 
         assert!(
@@ -323,6 +330,7 @@ module swop::swop {
     }
 
     public fun claim_coins_from_offer<CoinType>(swap: &mut SwapRequest, ctx: &mut TxContext): Coin<CoinType> {
+        assert!(swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
         assert!(
             sender == swap.initiator ||
@@ -358,6 +366,7 @@ module swop::swop {
         clock: &Clock,
         ctx: &mut TxContext
     ): Receipt {
+        assert!(swap_db.version == VERSION && swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
         assert!(clock::timestamp_ms(clock) < swap.expiry, ERequestExpired);
         assert!((sender == swap.counterparty && swap.status == SWAP_STATUS_PENDING_COUNTERPARTY), EActionNotAllowed);
@@ -370,7 +379,7 @@ module swop::swop {
             let escrowed_balance: &Balance<CoinType> = field::borrow(&offer.escrowed_balance_wrapper, type_name);
             assert!(balance::value(escrowed_balance) == swap.coins_to_receive, EInsufficientValue);
         };
-        
+
         swap.status = SWAP_STATUS_ACCEPTED;
 
         // Remove swap_id from requests
@@ -386,6 +395,7 @@ module swop::swop {
     }
 
     public fun take_swop_fee(coin: Coin<SUI>, swap: &mut SwapRequest, receipt: Receipt) {
+        assert!(swap.version == VERSION, EWrongVersion);
         assert!(object::id(swap) == receipt.swap_id, EInvalidSwapId);
         assert!(receipt.tx_type == TX_TYPE_CREATE || receipt.tx_type == TX_TYPE_ACCEPT, EInvalidSequence);
         assert!(coin::value(&coin) == receipt.platform_fee_to_pay, EInsufficientValue);
@@ -431,7 +441,7 @@ module swop::swop {
 
     #[test_only]
     public fun set_coin_type_to_receive(swap: &mut SwapRequest, coin_type: vector<u8>) {
-        swap.coin_type_to_receive = string(coin_type);
+        swap.coin_type_to_receive = std::ascii::string(coin_type);
     }
 
     #[test_only]
@@ -452,7 +462,8 @@ module swop::swop {
             requests: table::new<address, VecSet<ID>>(ctx),
             allowed_projects: object::new(ctx),
             allowed_coins: object::new(ctx),
-            platform_fee: 0
+            platform_fee: 0,
+            version: VERSION
         };
 
         let type_name = type_name::into_string(type_name::get<SUI>());
