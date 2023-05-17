@@ -1,5 +1,6 @@
 module swop::admin {
     use std::type_name::{Self};
+    use std::ascii::{String};
     use sui::dynamic_field::{Self as field};
     use sui::transfer::{Self};
     use sui::object::{Self, UID};
@@ -12,7 +13,9 @@ module swop::admin {
     const EInvalidSwapId: u64 = 400;
     const EProjectAlreadyRegistered: u64 = 401;
     const ECoinTypeAlreadyRegistered: u64 = 402;
-    const EActionNotAllowed: u64 = 403;
+    const EProjectNotFound: u64 = 403;
+    const ECoinTypeNotFound: u64 = 404;
+    const EActionNotAllowed: u64 = 405;
 
     const SWAP_STATUS_ACCEPTED: u64 = 100;
     const SWAP_STATUS_COMPLETED: u64 = 101;
@@ -21,23 +24,43 @@ module swop::admin {
         id: UID,
     }
 
+    #[test_only]
+    public fun init_test(ctx: &mut TxContext) {
+        let admin_cap = AdminCap { id: object::new(ctx) };
+        transfer::transfer(admin_cap, tx_context::sender(ctx));
+    }
+
     fun init(ctx: &mut TxContext) {
         let admin_cap = AdminCap { id: object::new(ctx) };
         transfer::transfer(admin_cap, tx_context::sender(ctx));
     }
 
-    public entry fun register_project<T>(_: &AdminCap, swap_db: &mut SwapDB) {
+    public entry fun list_project<T>(_: &AdminCap, swap_db: &mut SwapDB) {
         let type_name = type_name::into_string(type_name::get<T>());
         let allowed_projects = swop::borrow_mut_allowed_projects(swap_db);
         assert!(!field::exists_(allowed_projects, type_name), EProjectAlreadyRegistered);
         field::add(allowed_projects, type_name, true);
     }
 
-    public entry fun register_coin<T>(_: &AdminCap, swap_db: &mut SwapDB) {
+    public entry fun list_coin<T>(_: &AdminCap, swap_db: &mut SwapDB) {
         let type_name = type_name::into_string(type_name::get<T>());
         let allowed_coins = swop::borrow_mut_allowed_coins(swap_db);
         assert!(!field::exists_(allowed_coins, type_name), ECoinTypeAlreadyRegistered);
         field::add(allowed_coins, type_name, true);
+    }
+
+    public entry fun delist_project<T>(_: &AdminCap, swap_db: &mut SwapDB) {
+        let type_name = type_name::into_string(type_name::get<T>());
+        let allowed_projects = swop::borrow_mut_allowed_projects(swap_db);
+        assert!(field::exists_(allowed_projects, type_name), EProjectNotFound);
+        field::add(allowed_projects, type_name, true);
+    }
+
+    public entry fun delist_coin<T>(_: &AdminCap, swap_db: &mut SwapDB) {
+        let type_name = type_name::into_string(type_name::get<T>());
+        let allowed_coins = swop::borrow_mut_allowed_coins(swap_db);
+        assert!(field::exists_(allowed_coins, type_name), ECoinTypeNotFound);
+        field::remove<String, bool>(allowed_coins, type_name);
     }
 
     public entry fun update_platform_fee(_: &AdminCap, swap_db: &mut SwapDB, new_platform_fee: u64) {

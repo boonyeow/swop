@@ -9,11 +9,12 @@ module swop::swop {
     use sui::sui::SUI;
     use sui::tx_context::{Self, TxContext};
     use sui::transfer::{Self};
-    use std::option::{Self, Option};
     use sui::coin::{Self, Coin};
     use sui::clock::{Self, Clock};
     use sui::dynamic_field::{Self as field};
     use swop::vec_set::{Self, VecSet};
+    #[test_only]
+    use std::ascii::string;
     friend swop::admin;
 
     const SWAP_STATUS_PENDING_INITIATOR: u64 = 100;
@@ -61,8 +62,8 @@ module swop::swop {
         nfts_to_receive: VecSet<ID>,
         coins_to_receive: u64,
         coin_type_to_receive: String,
-        initiator_offer: Option<Offer>,
-        counterparty_offer: Option<Offer>,
+        initiator_offer: Offer,
+        counterparty_offer: Offer,
         status: u64,
         expiry: u64,
         platform_fee_balance: Balance<SUI>
@@ -90,6 +91,8 @@ module swop::swop {
             platform_fee: 0
         };
 
+        let type_name = type_name::into_string(type_name::get<SUI>());
+        field::add(&mut swap_db.allowed_coins, type_name, true);
         transfer::share_object(swap_db);
     }
 
@@ -107,12 +110,12 @@ module swop::swop {
         let sender = tx_context::sender(ctx);
         assert!(sender != counterparty, EActionNotAllowed);
 
-        let initiator_offer = option::some(
+        let initiator_offer =
             Offer { owner: sender, escrowed_nfts: bag::new(ctx), escrowed_balance_wrapper: object::new(ctx) }
-        );
-        let counterparty_offer = option::some(
+        ;
+        let counterparty_offer =
             Offer { owner: counterparty, escrowed_nfts: bag::new(ctx), escrowed_balance_wrapper: object::new(ctx) }
-        );
+        ;
 
         let swap = SwapRequest {
             id: object::new(ctx),
@@ -163,9 +166,9 @@ module swop::swop {
         let offer = {
             if (sender == swap.counterparty) {
                 assert!(vec_set::contains(&swap.nfts_to_receive, object::borrow_id(&nft)), 0);
-                option::borrow_mut(&mut swap.counterparty_offer)
+                &mut swap.counterparty_offer
             } else {
-                option::borrow_mut(&mut swap.initiator_offer)
+                &mut swap.initiator_offer
             }
         };
 
@@ -192,10 +195,10 @@ module swop::swop {
             if (sender == swap.counterparty) {
                 assert!(swap.coins_to_receive == coin::value(&coins), EInsufficientValue);
                 assert!(type_name == swap.coin_type_to_receive, ECoinNotAllowed); // need to change it to cmp_u8_vector
-                option::borrow_mut(&mut swap.counterparty_offer)
+                &mut swap.counterparty_offer
             } else {
                 assert!(field::exists_(&swap_db.allowed_coins, type_name), ECoinNotAllowed);
-                option::borrow_mut(&mut swap.initiator_offer)
+                &mut swap.initiator_offer
             }
         };
 
@@ -210,8 +213,15 @@ module swop::swop {
 
     fun is_offer_empty<CoinType>(offer: &Offer): bool {
         let type_name = type_name::into_string(type_name::get<CoinType>());
-        let escrowed_balance: &Balance<CoinType> = field::borrow(&offer.escrowed_balance_wrapper, type_name);
-        balance::value(escrowed_balance) == 0 && bag::is_empty(&offer.escrowed_nfts)
+        let escrowed_balance_value = {
+            if (field::exists_(&offer.escrowed_balance_wrapper, type_name)) {
+                let escrowed_balance: &Balance<CoinType> = field::borrow(&offer.escrowed_balance_wrapper, type_name);
+                balance::value(escrowed_balance)
+            } else {
+                0
+            }
+        };
+        escrowed_balance_value == 0 && bag::is_empty(&offer.escrowed_nfts)
     }
 
     public fun create<CoinType>(
@@ -224,8 +234,8 @@ module swop::swop {
         let sender = tx_context::sender(ctx);
 
         assert!(sender == swap.initiator, EActionNotAllowed);
-        // Makes sure initiator offer and counterparty offer requested are not empty
-        assert!((is_offer_empty<CoinType>(option::borrow(&swap.initiator_offer))), EInvalidOffer);
+        // Makes sure initiator offer is not empty
+        assert!(!is_offer_empty<CoinType>(&swap.initiator_offer), EInvalidOffer);
 
         swap.expiry = clock::timestamp_ms(clock) + valid_for;
         swap.status = SWAP_STATUS_PENDING_COUNTERPARTY;
@@ -289,7 +299,7 @@ module swop::swop {
         coin::take(&mut swap.platform_fee_balance, platform_fee_value, ctx)
     }
 
-    public fun claim_nft<T: key+store>(swap: &mut SwapRequest, item_key: u64, ctx: &mut TxContext): T {
+    public fun claim_nft_from_offer<T: key+store>(swap: &mut SwapRequest, item_key: u64, ctx: &mut TxContext): T {
         let sender = tx_context::sender(ctx);
 
         assert!(
@@ -300,19 +310,19 @@ module swop::swop {
         let offer = {
             if (swap.status == SWAP_STATUS_ACCEPTED) {
                 if (sender == swap.counterparty) {
-                    option::borrow_mut(&mut swap.initiator_offer)
+                    &mut swap.initiator_offer
                 }else {
-                    option::borrow_mut(&mut swap.counterparty_offer)
+                    &mut swap.counterparty_offer
                 }
             }else {
-                option::borrow_mut(&mut swap.initiator_offer)
+                &mut swap.initiator_offer
             }
         };
 
         bag::remove(&mut offer.escrowed_nfts, item_key)
     }
 
-    public fun claim_coins<CoinType>(swap: &mut SwapRequest, ctx: &mut TxContext): Coin<CoinType> {
+    public fun claim_coins_from_offer<CoinType>(swap: &mut SwapRequest, ctx: &mut TxContext): Coin<CoinType> {
         let sender = tx_context::sender(ctx);
         assert!(
             sender == swap.initiator ||
@@ -323,12 +333,12 @@ module swop::swop {
         let offer = {
             if (swap.status == SWAP_STATUS_ACCEPTED) {
                 if (sender == swap.counterparty) {
-                    option::borrow_mut(&mut swap.initiator_offer)
+                    &mut swap.initiator_offer
                 }else {
-                    option::borrow_mut(&mut swap.counterparty_offer)
+                    &mut swap.counterparty_offer
                 }
             }else {
-                option::borrow_mut(&mut swap.initiator_offer)
+                &mut swap.initiator_offer
             }
         };
 
@@ -349,16 +359,18 @@ module swop::swop {
         ctx: &mut TxContext
     ): Receipt {
         let sender = tx_context::sender(ctx);
-        assert!(clock::timestamp_ms(clock) > swap.expiry, ERequestExpired);
+        assert!(clock::timestamp_ms(clock) < swap.expiry, ERequestExpired);
         assert!((sender == swap.counterparty && swap.status == SWAP_STATUS_PENDING_COUNTERPARTY), EActionNotAllowed);
         // Check if coins and nfts supplied by counterparty matches swap terms
-        let offer = option::borrow(&swap.counterparty_offer);
-
-        let type_name = type_name::into_string(type_name::get<CoinType>());
-        let escrowed_balance: &Balance<CoinType> = field::borrow(&offer.escrowed_balance_wrapper, type_name);
-        assert!(balance::value(escrowed_balance) == swap.coins_to_receive, EInsufficientValue);
+        let offer = &swap.counterparty_offer;
         assert!(bag::length(&offer.escrowed_nfts) == vec_set::size(&swap.nfts_to_receive), ESuppliedLengthMismatch);
 
+        if (swap.coins_to_receive != 0) {
+            let type_name = type_name::into_string(type_name::get<CoinType>());
+            let escrowed_balance: &Balance<CoinType> = field::borrow(&offer.escrowed_balance_wrapper, type_name);
+            assert!(balance::value(escrowed_balance) == swap.coins_to_receive, EInsufficientValue);
+        };
+        
         swap.status = SWAP_STATUS_ACCEPTED;
 
         // Remove swap_id from requests
@@ -407,6 +419,30 @@ module swop::swop {
         &mut swap.status
     }
 
+    #[test_only]
+    public fun set_nfts_to_receive(swap: &mut SwapRequest, nfts_to_receive: vector<ID>) {
+        swap.nfts_to_receive = vec_set::from_keys(nfts_to_receive);
+    }
+
+    #[test_only]
+    public fun set_coins_to_receive(swap: &mut SwapRequest, coins_to_receive: u64) {
+        swap.coins_to_receive = coins_to_receive;
+    }
+
+    #[test_only]
+    public fun set_coin_type_to_receive(swap: &mut SwapRequest, coin_type: vector<u8>) {
+        swap.coin_type_to_receive = string(coin_type);
+    }
+
+    #[test_only]
+    public fun get_platform_fee(swap_db: &SwapDB): u64 {
+        swap_db.platform_fee
+    }
+
+    #[test_only]
+    public fun get_platform_fee_balance(swap: &SwapRequest): u64 {
+        balance::value(&swap.platform_fee_balance)
+    }
 
     #[test_only]
     public fun init_test(ctx: &mut TxContext) {
@@ -419,6 +455,8 @@ module swop::swop {
             platform_fee: 0
         };
 
+        let type_name = type_name::into_string(type_name::get<SUI>());
+        field::add(&mut swap_db.allowed_coins, type_name, true);
         transfer::share_object(swap_db);
     }
 
@@ -432,5 +470,10 @@ module swop::swop {
     #[test_only]
     public fun is_swap_accepted(swap: &SwapRequest): bool {
         swap.status == SWAP_STATUS_ACCEPTED
+    }
+
+    #[test_only]
+    public fun destroy_receipt(receipt: Receipt) {
+        let Receipt { swap_id: _, tx_type: _, platform_fee_to_pay: _ } = receipt;
     }
 }
