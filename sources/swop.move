@@ -205,6 +205,7 @@ module swop::swop {
             }
         };
 
+        // TODO: Replace with init-ing in the dynamic field in the create stage
         if (!field::exists_(&offer.escrowed_balance_wrapper, type_name)) {
             field::add(&mut offer.escrowed_balance_wrapper, type_name, balance::zero<CoinType>());
         };
@@ -273,7 +274,6 @@ module swop::swop {
         clock: &Clock,
         ctx: &mut TxContext
     ): Receipt {
-        assert!(swap_db.version == VERSION && swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
         assert!(swap.initiator == sender && swap.status == SWAP_STATUS_PENDING_COUNTERPARTY, EActionNotAllowed);
 
@@ -298,7 +298,6 @@ module swop::swop {
     }
 
     public fun refund_platform_fee(swap: &mut SwapRequest, receipt: Receipt, ctx: &mut TxContext): Coin<SUI> {
-        assert!(swap.version == VERSION, EWrongVersion);
         let swap_id = object::id(swap);
         let sender = tx_context::sender(ctx);
 
@@ -312,7 +311,6 @@ module swop::swop {
     }
 
     public fun claim_nft_from_offer<T: key+store>(swap: &mut SwapRequest, item_key: u64, ctx: &mut TxContext): T {
-        assert!(swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
 
         assert!(
@@ -336,7 +334,6 @@ module swop::swop {
     }
 
     public fun claim_coins_from_offer<CoinType>(swap: &mut SwapRequest, ctx: &mut TxContext): Coin<CoinType> {
-        assert!(swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
         assert!(
             sender == swap.initiator ||
