@@ -205,6 +205,9 @@ module swop::swop {
             }
         };
 
+        if (!field::exists_(&offer.escrowed_balance_wrapper, type_name)) {
+            field::add(&mut offer.escrowed_balance_wrapper, type_name, balance::zero<CoinType>());
+        };
         let escrowed_balance: &mut Balance<CoinType> = field::borrow_mut(
             &mut offer.escrowed_balance_wrapper,
             type_name
@@ -241,6 +244,9 @@ module swop::swop {
         // Makes sure initiator offer is not empty
         assert!(!is_offer_empty<CoinType>(&swap.initiator_offer), EInvalidOffer);
 
+        let type_name = type_name::into_string(type_name::get<CoinType>());
+        field::add(&mut swap.counterparty_offer.escrowed_balance_wrapper, type_name, balance::zero<CoinType>());
+
         swap.expiry = clock::timestamp_ms(clock) + valid_for;
         swap.status = SWAP_STATUS_PENDING_COUNTERPARTY;
 
@@ -269,7 +275,7 @@ module swop::swop {
     ): Receipt {
         assert!(swap_db.version == VERSION && swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
-        assert!(swap.initiator == sender && swap.status == SWAP_STATUS_PENDING_INITIATOR, EActionNotAllowed);
+        assert!(swap.initiator == sender && swap.status == SWAP_STATUS_PENDING_COUNTERPARTY, EActionNotAllowed);
 
         swap.status = {
             if (clock::timestamp_ms(clock) > swap.expiry) {
@@ -435,13 +441,9 @@ module swop::swop {
     }
 
     #[test_only]
-    public fun set_coins_to_receive(swap: &mut SwapRequest, coins_to_receive: u64) {
+    public fun set_coins_to_receive<T>(swap: &mut SwapRequest, coins_to_receive: u64) {
         swap.coins_to_receive = coins_to_receive;
-    }
-
-    #[test_only]
-    public fun set_coin_type_to_receive(swap: &mut SwapRequest, coin_type: vector<u8>) {
-        swap.coin_type_to_receive = std::ascii::string(coin_type);
+        swap.coin_type_to_receive = type_name::into_string(type_name::get<T>());
     }
 
     #[test_only]
@@ -481,6 +483,16 @@ module swop::swop {
     #[test_only]
     public fun is_swap_accepted(swap: &SwapRequest): bool {
         swap.status == SWAP_STATUS_ACCEPTED
+    }
+
+    #[test_only]
+    public fun is_swap_cancelled(swap: &SwapRequest): bool {
+        swap.status == SWAP_STATUS_CANCELLED
+    }
+
+    #[test_only]
+    public fun is_swap_expired(swap: &SwapRequest): bool {
+        swap.status == SWAP_STATUS_EXPIRED
     }
 
     #[test_only]
