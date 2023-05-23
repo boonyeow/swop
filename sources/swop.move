@@ -167,7 +167,7 @@ module swop::swop {
 
         let offer = {
             if (sender == swap.counterparty) {
-                assert!(vec_set::contains(&swap.nfts_to_receive, object::borrow_id(&nft)), 0);
+                assert!(vec_set::contains(&swap.nfts_to_receive, object::borrow_id(&nft)), EInvalidOffer);
                 &mut swap.counterparty_offer
             } else {
                 &mut swap.initiator_offer
@@ -314,7 +314,8 @@ module swop::swop {
         let sender = tx_context::sender(ctx);
 
         assert!(
-            sender == swap.initiator || (sender == swap.counterparty && swap.status == SWAP_STATUS_ACCEPTED),
+            (sender == swap.initiator && swap.status != SWAP_STATUS_PENDING_COUNTERPARTY) ||
+                (sender == swap.counterparty && swap.status == SWAP_STATUS_ACCEPTED),
             EActionNotAllowed
         );
 
@@ -322,10 +323,10 @@ module swop::swop {
             if (swap.status == SWAP_STATUS_ACCEPTED) {
                 if (sender == swap.counterparty) {
                     &mut swap.initiator_offer
-                }else {
+                } else {
                     &mut swap.counterparty_offer
                 }
-            }else {
+            } else {
                 &mut swap.initiator_offer
             }
         };
@@ -336,7 +337,7 @@ module swop::swop {
     public fun claim_coins_from_offer<CoinType>(swap: &mut SwapRequest, ctx: &mut TxContext): Coin<CoinType> {
         let sender = tx_context::sender(ctx);
         assert!(
-            sender == swap.initiator ||
+            (sender == swap.initiator && swap.status != SWAP_STATUS_PENDING_COUNTERPARTY) ||
                 (sender == swap.counterparty && swap.status == SWAP_STATUS_ACCEPTED),
             EActionNotAllowed
         );
@@ -372,7 +373,7 @@ module swop::swop {
         assert!(swap_db.version == VERSION && swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
         assert!(clock::timestamp_ms(clock) < swap.expiry, ERequestExpired);
-        assert!((sender == swap.counterparty && swap.status == SWAP_STATUS_PENDING_COUNTERPARTY), EActionNotAllowed);
+        assert!(sender == swap.counterparty && swap.status == SWAP_STATUS_PENDING_COUNTERPARTY, EActionNotAllowed);
         // Check if coins and nfts supplied by counterparty matches swap terms
         let offer = &swap.counterparty_offer;
         assert!(bag::length(&offer.escrowed_nfts) == vec_set::size(&swap.nfts_to_receive), ESuppliedLengthMismatch);
