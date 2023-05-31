@@ -52,7 +52,7 @@ module swop::admin {
         let type_name = type_name::into_string(type_name::get<T>());
         let allowed_projects = swop::borrow_mut_allowed_projects(swap_db);
         assert!(field::exists_(allowed_projects, type_name), EProjectNotFound);
-        field::add(allowed_projects, type_name, true);
+        field::remove<String, bool>(allowed_projects, type_name);
     }
 
     public entry fun delist_coin<T>(_: &AdminCap, swap_db: &mut SwapDB) {
