@@ -102,7 +102,7 @@ module swop::swop {
         coins_to_receive: u64,
         coin_type_to_receive: String,
         ctx: &mut TxContext
-    ): ID {
+    ): SwapRequest {
         assert!(swap_db.version == VERSION, EWrongVersion);
         assert!((!vector::is_empty(&nfts_to_receive) || coins_to_receive > 0), EInvalidOffer);
         assert!(field::exists_(&swap_db.allowed_coins, coin_type_to_receive), ECoinNotAllowed);
@@ -132,12 +132,11 @@ module swop::swop {
             version: VERSION
         };
         let swap_id = object::id(&swap);
-        transfer::share_object(swap);
 
         let registry = &mut swap_db.registry;
         add_swap_id_to_registry(registry, swap_id, sender, SWAP_INITIATOR, ctx);
         add_swap_id_to_registry(registry, swap_id, counterparty, SWAP_COUNTERPARTY, ctx);
-        swap_id
+        swap
     }
 
     entry fun add_swap_id_to_registry(
@@ -233,11 +232,11 @@ module swop::swop {
 
     public fun create<CoinType>(
         swap_db: &mut SwapDB,
-        swap: &mut SwapRequest,
+        swap: SwapRequest,
         clock: &Clock,
         valid_for: u64,
         ctx: &mut TxContext
-    ): Receipt {
+    ): (Receipt, SwapRequest) {
         assert!(swap_db.version == VERSION && swap.version == VERSION, EWrongVersion);
         let sender = tx_context::sender(ctx);
 
@@ -253,7 +252,7 @@ module swop::swop {
 
         // Add swap to open requests
         let requests = &mut swap_db.requests;
-        let swap_id = object::id(swap);
+        let swap_id = object::id(&swap);
         if (table::contains(requests, sender)) {
             let open_swaps = table::borrow_mut(requests, sender);
             vec_set::insert(open_swaps, swap_id);
@@ -261,11 +260,11 @@ module swop::swop {
             table::add(requests, sender, vec_set::singleton(swap_id));
         };
 
-        Receipt {
+        (Receipt {
             swap_id,
             tx_type: TX_TYPE_CREATE,
             platform_fee_to_pay: swap_db.platform_fee
-        }
+        }, swap)
     }
 
     public fun remove_open_swap(
@@ -398,7 +397,16 @@ module swop::swop {
         }
     }
 
-    public fun take_swop_fee(coin: Coin<SUI>, swap: &mut SwapRequest, receipt: Receipt) {
+    public fun take_fee_from_counterparty(coin: Coin<SUI>, swap: &mut SwapRequest, receipt: Receipt) {
+        take_fee(coin, swap, receipt);
+    }
+
+    public fun take_fee_from_initiator(coin: Coin<SUI>, swap: SwapRequest, receipt: Receipt) {
+        take_fee(coin, &mut swap, receipt);
+        transfer::share_object(swap);
+    }
+
+    fun take_fee(coin: Coin<SUI>, swap: &mut SwapRequest, receipt: Receipt) {
         assert!(swap.version == VERSION, EWrongVersion);
         assert!(object::id(swap) == receipt.swap_id, EInvalidSwapId);
         assert!(receipt.tx_type == TX_TYPE_CREATE || receipt.tx_type == TX_TYPE_ACCEPT, EInvalidSequence);
@@ -431,17 +439,6 @@ module swop::swop {
 
     public(friend) fun borrow_mut_sr_status(swap: &mut SwapRequest): &mut u64 {
         &mut swap.status
-    }
-
-    #[test_only]
-    public fun set_nfts_to_receive(swap: &mut SwapRequest, nfts_to_receive: vector<ID>) {
-        swap.nfts_to_receive = vec_set::from_keys(nfts_to_receive);
-    }
-
-    #[test_only]
-    public fun set_coins_to_receive<T>(swap: &mut SwapRequest, coins_to_receive: u64) {
-        swap.coins_to_receive = coins_to_receive;
-        swap.coin_type_to_receive = type_name::into_string(type_name::get<T>());
     }
 
     #[test_only]

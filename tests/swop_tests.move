@@ -4,8 +4,8 @@ module swop::swop_tests {
     use sui::transfer::{Self};
     use sui::coin::{Self, Coin};
     use sui::sui::{SUI};
-    use sui::object::{Self, UID, ID, id_from_address};
-    use swop::swop::{Self, SwapDB, SwapRequest, remove_open_swap};
+    use sui::object::{Self, UID, ID};
+    use swop::swop::{Self, SwapDB, SwapRequest};
     use swop::admin::{Self, AdminCap};
     // use sui::test_utils::{print as sprint};
     use sui::clock::{Self, Clock};
@@ -14,7 +14,7 @@ module swop::swop_tests {
     use std::type_name::{Self};
     use sui::tx_context::{Self};
     // use std::string;
-    // use std::ascii::string;
+    // use std::ascii::{String};
     // use std::debug::print;
 
     const ADMIN: address = @0x000A;
@@ -67,7 +67,6 @@ module swop::swop_tests {
     }
 
     fun take_coins<T: drop>(scenario: &mut Scenario, user: address, amount: u64): Coin<T> {
-        ts::next_tx(scenario, user);
         let coins = ts::take_from_address<Coin<T>>(scenario, user);
         let split_coin = coin::split(&mut coins, amount, ts::ctx(scenario));
         ts::return_to_address(user, coins);
@@ -106,7 +105,6 @@ module swop::swop_tests {
         user: address,
         obj_id: ID
     ) {
-        ts::next_tx(scenario, user);
         let obj = ts::take_from_address_by_id<T>(scenario, user, obj_id);
         swop::add_nft_to_offer(swap_db, swap, obj, ts::ctx(scenario));
     }
@@ -118,7 +116,6 @@ module swop::swop_tests {
         user: address,
         amount: u64
     ) {
-        ts::next_tx(scenario, user);
         let coins = take_coins<CoinType>(scenario, user, amount);
         swop::add_coins_to_offer(swap_db, swap, coins, ts::ctx(scenario));
     }
@@ -159,15 +156,15 @@ module swop::swop_tests {
         );
     }
 
-    fun init_test_env(scenario: &mut Scenario): (AdminCap, SwapDB, SwapRequest, Clock, ID, ID, ID, ID) {
+    fun init_test_env(scenario: &mut Scenario): (AdminCap, SwapDB, Clock, ID, ID, ID, ID) {
         ts::next_tx(scenario, ALICE);
         mint_coins_to_user<SUI>(scenario, COINS_TO_MINT, ALICE);
         mint_coins_to_user<SUI>(scenario, COINS_TO_MINT, BOB);
         mint_coins_to_user<BTC>(scenario, COINS_TO_MINT, BOB);
 
         let alice_obj1 = ItemA { id: object::new(ts::ctx(scenario)) };
-        let alice_obj2 = ItemA { id: object::new(ts::ctx(scenario)) };
-        let bob_obj1 = ItemB { id: object::new(ts::ctx(scenario)) };
+        let alice_obj2 = ItemB { id: object::new(ts::ctx(scenario)) };
+        let bob_obj1 = ItemA { id: object::new(ts::ctx(scenario)) };
         let bob_obj2 = ItemB { id: object::new(ts::ctx(scenario)) };
 
         let alice_id1 = object::id(&alice_obj1);
@@ -187,6 +184,7 @@ module swop::swop_tests {
             let admin_cap = take_admin_cap(scenario);
             admin::list_project<ItemA>(&admin_cap, &mut swap_db);
             admin::list_project<ItemB>(&admin_cap, &mut swap_db);
+            admin::list_coin<BTC>(&admin_cap, &mut swap_db);
 
             let clock = clock::create_for_testing(ts::ctx(scenario));
             clock::share_for_testing(clock);
@@ -196,1923 +194,7 @@ module swop::swop_tests {
             (swap_db, admin_cap, clock)
         };
 
-        let type_name = type_name::into_string(type_name::get<SUI>());
-        let swap_id = swop::create_init(
-            &mut swap_db,
-            BOB,
-            vector::singleton(id_from_address(@0x400)),
-            0,
-            type_name,
-            ts::ctx(scenario)
-        );
-
-        ts::next_tx(scenario, ALICE);
-        let swap = ts::take_shared_by_id<SwapRequest>(scenario, swap_id);
-
-        (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, bob_id1, bob_id2)
-    }
-
-    // Create swop request - [coin] for [(other) coin]
-    #[test]
-    fun swap_success_coin_for_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, _alice_id1, _alice_id2, _bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector::empty());
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, sender, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [coin] for [one item]
-    #[test]
-    fun swap_success_coin_for_single() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, _alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, sender, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<SUI>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s)
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [coin] for [one item + (other) coin]
-    #[test]
-    fun swap_success_coin_for_single_with_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, _alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, sender, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [coin] for [multiple items]
-    #[test]
-    fun swap_success_coin_for_multiple() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, _alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, sender, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 1, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [coin] for [multiple items + (other) coin]
-    #[test]
-    fun swap_success_coin_for_multiple_with_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, _alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, sender, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 1, sender);
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-
-    // Create swop request - [one item] for [(other) coin]
-    #[test]
-    fun swap_success_single_for_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, _bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector::empty());
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [one item] for [one item]
-    #[test]
-    fun swap_success_single_for_single() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<SUI>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s)
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s)
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [one item] for [one item + (other) coin]
-    #[test]
-    fun swap_success_single_for_single_with_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [one item] for [multiple items]
-    #[test]
-    fun swap_success_single_for_multiple() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<SUI>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s)
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 1, sender);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id2), EObjectNotInInventory);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s)
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [one item] for [multiple items + (other) coin]
-    #[test]
-    fun swap_success_single_for_multiple_with_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 1, sender);
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-
-    // Create swop request - [multiple items] for [(other) coin]
-    #[test]
-    fun swap_success_multiple_for_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, _bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector::empty());
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 1, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swap request - [multiple items] for [single item]
-    #[test]
-    fun swap_success_multiple_for_single() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<SUI>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s)
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s)
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 1, sender);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id2), EObjectNotInInventory);
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [multiple items] for [one item + (other) coin]
-    #[test]
-    fun swap_success_multiple_for_single_with_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 1, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [multiple items] for [multiple items]
-    #[test]
-    fun swap_success_multiple_for_multiple() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<SUI>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s)
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 1, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id2), EObjectNotInInventory);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s)
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 1, sender);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id2), EObjectNotInInventory);
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [multiple items] for [multiple items + (other) coin]
-    #[test]
-    fun swap_success_multiple_for_multiple_with_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 1, sender);
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 1, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-
-    // Create swop request - [one item + coin] for [(other) coin]
-    #[test]
-    fun swap_success_single_with_coin_for_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, _bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector::empty());
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [one item + coin] for [one item]
-    #[test]
-    fun swap_success_single_with_coin_for_single() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<SUI>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s)
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [one item + coin] for [one item + (other) coin]
-    #[test]
-    fun swap_success_single_with_coin_for_single_with_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [one item + coin] for [multiple items]
-    #[test]
-    fun swap_success_single_with_coin_for_multiple() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 1, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [one item + coin] for [multiple items + (other) coin]
-    #[test]
-    fun swap_success_single_with_coin_for_multiple_with_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 1, sender);
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-
-    // Create swop request - [multiple items + coin] for [(other) coin)]
-    #[test]
-    fun swap_success_multiple_with_coin_for_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, _bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector::empty());
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 1, sender);
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [multiple items + coin] for [one item]
-    #[test]
-    fun swap_success_multiple_with_coin_for_single() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<SUI>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s)
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 1, sender);
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [multiple items + coin] for [one item + (other) coin]
-    #[test]
-    fun swap_success_multiple_with_coin_for_single_with_coin() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 1, sender);
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
-                EIncorrectCoinBalance
-            );
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Create swop request - [multiple items + coin] for [multiple items]
-    #[test]
-    fun swap_success_multiple_with_coin_for_multiple() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
-
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
-
-            // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-
-            // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
-        assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 1, sender);
-
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT - initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        ts::next_tx(scenario, BOB);
-        {
-            // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 1, sender);
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
-
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id2), EObjectNotInInventory);
-            assert!(
-                get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
-                EIncorrectCoinBalance
-            );
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
+        (admin_cap, swap_db, clock, alice_id1, alice_id2, bob_id1, bob_id2)
     }
 
     // Create swop request - [multiple items + coin] for [multiple items + (other) coin]
@@ -2120,61 +202,71 @@ module swop::swop_tests {
     fun swap_success_multiple_with_coin_for_multiple_with_coin() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
+
         let initiator_sui_coin_offer = 10;
         let counter_btc_coin_offer = 20;
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
+        let ctrparty_swap_fee = take_coins<SUI>(scenario, BOB, platform_fee);
+
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1, bob_id2],
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+
+            // Initiator adds nft(s), coins to be swapped
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, ALICE, alice_id2);
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
+        assert!(swop::get_platform_fee_balance(&mut swap) == platform_fee, EIncorrectPlatformFee);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, BOB, bob_id1);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, BOB, bob_id2);
+            add_coin_to_offer_<BTC>(scenario, swap_db_mut, &mut swap, BOB, counter_btc_coin_offer);
 
             // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
+            let receipt = swop::accept<BTC>(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
 
             // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
+            swop::take_fee_from_counterparty(ctrparty_swap_fee, &mut swap, receipt);
         };
+        assert!(swop::get_platform_fee_balance(&mut swap) == (platform_fee * 2), EIncorrectPlatformFee);
 
-        // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
+        let swap_id = object::id(&swap);
         assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
+        assert!(swop::is_swap_accepted(&swap), EIncorrectSwapStatus);
 
         ts::next_tx(scenario, ALICE);
         {
             // Initiator claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 1, sender);
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
+            claim_nft_from_offer_<ItemA>(scenario, &mut swap, 0, ALICE);
+            claim_nft_from_offer_<ItemB>(scenario, &mut swap, 1, ALICE);
+            claim_coins_from_offer_<BTC>(scenario, &mut swap, ALICE);
 
-            assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
+            assert!(is_object_in_inventory<ItemA>(scenario, ALICE, bob_id1), EObjectNotInInventory);
             assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id2), EObjectNotInInventory);
             assert!(
                 get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
@@ -2189,13 +281,12 @@ module swop::swop_tests {
         ts::next_tx(scenario, BOB);
         {
             // Counterparty claims nft(s) and coins
-            let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 1, sender);
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
+            claim_nft_from_offer_<ItemA>(scenario, &mut swap, 0, BOB);
+            claim_nft_from_offer_<ItemB>(scenario, &mut swap, 1, BOB);
+            claim_coins_from_offer_<SUI>(scenario, &mut swap, BOB);
 
             assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
-            assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id2), EObjectNotInInventory);
+            assert!(is_object_in_inventory<ItemB>(scenario, BOB, alice_id2), EObjectNotInInventory);
             assert!(
                 get_coins_balance<BTC>(scenario, BOB) == COINS_TO_MINT - counter_btc_coin_offer,
                 EIncorrectCoinBalance
@@ -2205,57 +296,66 @@ module swop::swop_tests {
                 EIncorrectCoinBalance
             );
         };
-
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
     }
-
 
     // Cancel swap request
     #[test]
     fun swap_status_cancelled() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, _alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, _alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
+
         let initiator_sui_coin_offer = 10;
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
+
         let counter_btc_coin_offer = 20;
 
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1, bob_id2],
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            // Initiator adds nft(s), coins to be swapped
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
 
+        ts::next_tx(scenario, ALICE);
+
         // Make sure swap request is in open requests
-        let swap_id = object::id(swap_mut);
+        let swap = ts::take_shared<SwapRequest>(scenario);
+        let swap_id = object::id(&swap);
+        assert!(swop::get_platform_fee_balance(&swap) == platform_fee, EIncorrectPlatformFee);
         assert!(swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotInOpenSwaps);
 
         ts::next_tx(scenario, ALICE);
         {
             // Initiator cancels swap request and claims deposited nft(s) and coins
             let sender = tx_context::sender(ts::ctx(scenario));
-            let receipt = swop::remove_open_swap(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-            let coin = swop::refund_platform_fee(swap_mut, receipt, ts::ctx(scenario));
+            let receipt = swop::remove_open_swap(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
+            let coin = swop::refund_platform_fee(&mut swap, receipt, ts::ctx(scenario));
             transfer::public_transfer(coin, sender);
 
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
+            claim_coins_from_offer_<SUI>(scenario, &mut swap, sender);
         };
 
         // Make sure swap request is no longer in requests & its status equals cancelled
-        let swap_id = object::id(swap_mut);
         assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_cancelled(swap_mut), EIncorrectSwapStatus);
+        assert!(swop::is_swap_cancelled(&swap), EIncorrectSwapStatus);
         assert!(get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT, EIncorrectCoinBalance);
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
@@ -2266,31 +366,43 @@ module swop::swop_tests {
     fun swap_status_expired() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, _alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, _alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
+
         let initiator_sui_coin_offer = 10;
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
+
         let counter_btc_coin_offer = 20;
+
         let swap_valid_duration = 1000000;
 
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1, bob_id2],
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            // Initiator adds nft(s), coins to be swapped
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, swap_valid_duration, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, swap_valid_duration, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+        ts::next_tx(scenario, ALICE);
 
         // Make sure swap request is in open requests
-        let swap_id = object::id(swap_mut);
+        let swap = ts::take_shared<SwapRequest>(scenario);
+        let swap_id = object::id(&swap);
+        assert!(swop::get_platform_fee_balance(&swap) == platform_fee, EIncorrectPlatformFee);
         assert!(swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotInOpenSwaps);
 
         clock::increment_for_testing(&mut clock, swap_valid_duration + 1);
@@ -2299,17 +411,16 @@ module swop::swop_tests {
         {
             // Initiator cancels swap request and claims deposited nft(s) and coins
             let sender = tx_context::sender(ts::ctx(scenario));
-            let receipt = swop::remove_open_swap(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-            let coin = swop::refund_platform_fee(swap_mut, receipt, ts::ctx(scenario));
+            let receipt = swop::remove_open_swap(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
+            let coin = swop::refund_platform_fee(&mut swap, receipt, ts::ctx(scenario));
             transfer::public_transfer(coin, sender);
 
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
+            claim_coins_from_offer_<SUI>(scenario, &mut swap, sender);
         };
 
         // Make sure swap request is no longer in requests & its status equals cancelled
-        let swap_id = object::id(swap_mut);
         assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_expired(swap_mut), EIncorrectSwapStatus);
+        assert!(swop::is_swap_expired(&swap), EIncorrectSwapStatus);
         assert!(get_coins_balance<SUI>(scenario, ALICE) == COINS_TO_MINT, EIncorrectCoinBalance);
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
@@ -2318,14 +429,14 @@ module swop::swop_tests {
 
     // Create an offer with no items or coins to be received
     #[test, expected_failure(abort_code = swop::swop::EInvalidOffer)]
-    fun swap_fail_create_offer_empty_initiator() {
+    fun swap_fail_initiator_create_empty_offer() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
 
         let swap_db = take_swop_db(scenario);
 
         let type_name = type_name::into_string(type_name::get<SUI>());
-        swop::create_init(
+        let swap = swop::create_init(
             &mut swap_db,
             BOB,
             vector::empty(),
@@ -2333,11 +444,12 @@ module swop::swop_tests {
             type_name,
             ts::ctx(scenario)
         );
-
+        transfer::public_share_object(swap);
         ts::return_shared(swap_db);
         ts::end(scenario_val);
     }
 
+    //
     // Create an offer with an unallowed coin to be received
     #[test, expected_failure(abort_code = swop::swop::ECoinNotAllowed)]
     fun swap_fail_create_offer_receive_unallowed_coin() {
@@ -2347,15 +459,15 @@ module swop::swop_tests {
         let swap_db = take_swop_db(scenario);
 
         let type_name = type_name::into_string(type_name::get<ETH>());
-        swop::create_init(
+        let swap = swop::create_init(
             &mut swap_db,
             BOB,
-            vector::singleton(id_from_address(@0x400)),
+            vector::singleton(object::id_from_address(@0x400)),
             0,
             type_name,
             ts::ctx(scenario)
         );
-
+        transfer::public_share_object(swap);
         ts::return_shared(swap_db);
         ts::end(scenario_val);
     }
@@ -2369,14 +481,15 @@ module swop::swop_tests {
         let swap_db = take_swop_db(scenario);
 
         let type_name = type_name::into_string(type_name::get<SUI>());
-        swop::create_init(
+        let swap = swop::create_init(
             &mut swap_db,
             ALICE,
-            vector::singleton(id_from_address(@0x400)),
+            vector::singleton(object::id_from_address(@0x400)),
             0,
             type_name,
             ts::ctx(scenario)
         );
+        transfer::public_share_object(swap);
 
         ts::return_shared(swap_db);
         ts::end(scenario_val);
@@ -2387,34 +500,40 @@ module swop::swop_tests {
     fun swap_fail_initiator_add_nft_after_creation() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
         let initiator_sui_coin_offer = 10;
         let counter_btc_coin_offer = 20;
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
+            let coin_type_to_receive = type_name::into_string(type_name::get<SUI>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1, bob_id2],
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         ts::next_tx(scenario, ALICE);
         {
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, ALICE, alice_id2);
         };
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
@@ -2425,47 +544,51 @@ module swop::swop_tests {
     fun swap_fail_counterparty_add_nft_after_accepting() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
+            let coin_type_to_receive = type_name::into_string(type_name::get<SUI>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id2],
+                0,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+
             // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
+        let bob_swap_fee = take_coins<SUI>(scenario, BOB, platform_fee);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, BOB, bob_id2);
 
             // Counterparty accepts swap request
-            let receipt = swop::accept<SUI>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
+            let receipt = swop::accept<SUI>(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
 
             // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
+            swop::take_fee_from_counterparty(bob_swap_fee, &mut swap, receipt);
         };
 
         ts::next_tx(scenario, BOB);
         {
-            let sender = tx_context::sender(ts::ctx(scenario));
-            let bob_obj3 = ItemB { id: object::new(ts::ctx(scenario)) };
-            let bob_id3 = object::id(&bob_obj3);
-            transfer::transfer(bob_obj3, BOB);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id3);
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, BOB, bob_id1);
         };
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
@@ -2476,31 +599,41 @@ module swop::swop_tests {
     fun swap_fail_add_unallowed_nft() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
 
         let alice_obj3 = ItemC { id: object::new(ts::ctx(scenario)) };
         let alice_id3 = object::id(&alice_obj3);
         transfer::transfer(alice_obj3, ALICE);
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
+
         ts::next_tx(scenario, ALICE);
         {
+            let coin_type_to_receive = type_name::into_string(type_name::get<SUI>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1],
+                0,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemC>(scenario, swap_db_mut, swap_mut, sender, alice_id3);
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
+            add_nft_to_offer_<ItemC>(scenario, swap_db_mut, &mut swap, ALICE, alice_id3);
 
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
     }
@@ -2510,38 +643,46 @@ module swop::swop_tests {
     fun swap_fail_add_unrequested_nft() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
+            let coin_type_to_receive = type_name::into_string(type_name::get<SUI>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1],
+                0,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
+        let bob_swap_fee = take_coins<SUI>(scenario, BOB, platform_fee);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
             let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, sender, bob_id2);
 
             // Counterparty accepts swap request
-            let receipt = swop::accept<SUI>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
+            let receipt = swop::accept<SUI>(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
 
             // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
+            swop::take_fee_from_counterparty(bob_swap_fee, &mut swap, receipt);
         };
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
@@ -2552,32 +693,38 @@ module swop::swop_tests {
     fun swap_fail_initiator_add_coin_after_creation() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
         let initiator_sui_coin_offer = 10;
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
+            let coin_type_to_receive = type_name::into_string(type_name::get<SUI>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1],
+                0,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         ts::next_tx(scenario, ALICE);
         {
             // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, sender, initiator_sui_coin_offer);
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
         };
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
@@ -2588,32 +735,38 @@ module swop::swop_tests {
     fun swap_fail_initiator_add_unallowed_coin() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
+
         let platform_fee = swop::get_platform_fee(swap_db_mut);
         let initiator_eth_coin_offer = 10;
-        let counter_btc_coin_offer = 20;
 
-
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
+        mint_coins_to_user<ETH>(scenario, COINS_TO_MINT, ALICE);
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
+            let coin_type_to_receive = type_name::into_string(type_name::get<SUI>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1],
+                0,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
-            mint_coins_to_user<ETH>(scenario, COINS_TO_MINT, ALICE);
-            add_coin_to_offer_<ETH>(scenario, swap_db_mut, swap_mut, ALICE, initiator_eth_coin_offer);
+            add_coin_to_offer_<ETH>(scenario, swap_db_mut, &mut swap, ALICE, initiator_eth_coin_offer);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
     }
@@ -2623,49 +776,56 @@ module swop::swop_tests {
     fun swap_fail_counterparty_add_coin_after_accepting() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, _bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, _bob_id1, _bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
         let initiator_sui_coin_offer = 10;
         let counter_btc_coin_offer = 20;
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector::empty(),
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector::empty());
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
+        let bob_swap_fee = take_coins<SUI>(scenario, BOB, platform_fee);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
             let sender = tx_context::sender(ts::ctx(scenario));
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
+            add_coin_to_offer_<BTC>(scenario, swap_db_mut, &mut swap, sender, counter_btc_coin_offer);
 
             // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
+            let receipt = swop::accept<BTC>(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
 
             // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
+            swop::take_fee_from_counterparty(bob_swap_fee, &mut swap, receipt);
         };
 
         ts::next_tx(scenario, BOB);
         {
-            // Counterparty adds nft(s) to swap
             let sender = tx_context::sender(ts::ctx(scenario));
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
+            add_coin_to_offer_<BTC>(scenario, swap_db_mut, &mut swap, sender, counter_btc_coin_offer);
         };
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
@@ -2676,43 +836,51 @@ module swop::swop_tests {
     fun swap_fail_counterparty_add_insufficient_coin() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, _bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
         let initiator_sui_coin_offer = 10;
         let counter_btc_coin_offer = 20;
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id2],
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
+        let bob_swap_fee = take_coins<SUI>(scenario, BOB, platform_fee);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
             let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer / 2);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, sender, bob_id2);
+            add_coin_to_offer_<BTC>(scenario, swap_db_mut, &mut swap, sender, counter_btc_coin_offer / 2);
 
             // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
+            let receipt = swop::accept<BTC>(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
 
             // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
+            swop::take_fee_from_counterparty(bob_swap_fee, &mut swap, receipt);
         };
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
@@ -2723,43 +891,51 @@ module swop::swop_tests {
     fun swap_fail_counterparty_add_unrequested_coin() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, _alice_id1, _alice_id2, _bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
+
         let initiator_sui_coin_offer = 10;
         let counter_btc_coin_offer = 20;
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
+        let ctrparty_swap_fee = take_coins<SUI>(scenario, BOB, platform_fee);
+
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id2],
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            // Initiator adds nft(s), coins to be swapped
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, BOB, bob_id2);
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, BOB, counter_btc_coin_offer);
 
             // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
+            let receipt = swop::accept<BTC>(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
 
             // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
+            swop::take_fee_from_counterparty(ctrparty_swap_fee, &mut swap, receipt);
         };
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
@@ -2770,79 +946,55 @@ module swop::swop_tests {
     fun swap_fail_counterparty_add_coin_twice() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
+
         let initiator_sui_coin_offer = 10;
         let counter_btc_coin_offer = 20;
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
+        let ctrparty_swap_fee = take_coins<SUI>(scenario, BOB, platform_fee);
+
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1],
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, BOB, bob_id1);
+            add_coin_to_offer_<BTC>(scenario, swap_db_mut, &mut swap, BOB, counter_btc_coin_offer);
+        };
 
+        ts::next_tx(scenario, BOB);
+        {
+            add_coin_to_offer_<BTC>(scenario, swap_db_mut, &mut swap, BOB, counter_btc_coin_offer);
             // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
+            let receipt = swop::accept<BTC>(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
 
             // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
-        };
-
-        end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
-    }
-
-    // Wrong initiator for swap
-    #[test, expected_failure(abort_code = swop::swop::EActionNotAllowed)]
-    fun swap_fail_sender_not_initiator() {
-        let scenario_val = ts::begin(ALICE);
-        let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
-        let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
-        let platform_fee = swop::get_platform_fee(swap_db_mut);
-        let initiator_sui_coin_offer = 10;
-        let counter_btc_coin_offer = 20;
-
-        ts::next_tx(scenario, ALICE);
-        {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
-        };
-
-        ts::next_tx(scenario, CAROL);
-        {
-            // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
-
-            // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_counterparty(ctrparty_swap_fee, &mut swap, receipt);
         };
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
@@ -2853,24 +1005,34 @@ module swop::swop_tests {
     fun swap_fail_empty_initiator_offer() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, _alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, _alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
+
+        let counter_btc_coin_offer = 20;
+
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
 
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1],
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
     }
@@ -2880,35 +1042,46 @@ module swop::swop_tests {
     fun swap_fail_counterparty_remove_unaccepted_swap() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
+
+        let counter_btc_coin_offer = 20;
+
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
 
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1],
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
             let sender = tx_context::sender(ts::ctx(scenario));
-            let receipt = remove_open_swap(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
-            let coin = swop::refund_platform_fee(swap_mut, receipt, ts::ctx(scenario));
+            let receipt = swop::remove_open_swap(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
+            let coin = swop::refund_platform_fee(&mut swap, receipt, ts::ctx(scenario));
             transfer::public_transfer(coin, sender);
 
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
+            claim_coins_from_offer_<SUI>(scenario, &mut swap, sender);
         };
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
@@ -2919,31 +1092,42 @@ module swop::swop_tests {
     fun swap_fail_counterparty_claim_nft_without_accepting() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
+
+        let counter_btc_coin_offer = 20;
+
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
 
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1],
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty claims nft(s)
             let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemA>(scenario, swap_mut, 0, sender);
+            claim_nft_from_offer_<ItemA>(scenario, &mut swap, 0, sender);
             assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
         };
 
@@ -2955,38 +1139,47 @@ module swop::swop_tests {
     fun swap_fail_initiator_claim_nft_without_counterparty_accepting() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
+            let coin_type_to_receive = type_name::into_string(type_name::get<SUI>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id2],
+                0,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
             let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, sender, bob_id2);
         };
 
         ts::next_tx(scenario, ALICE);
         {
             // Initiator claims nft(s)
             let sender = tx_context::sender(ts::ctx(scenario));
-            claim_nft_from_offer_<ItemB>(scenario, swap_mut, 0, sender);
+            claim_nft_from_offer_<ItemB>(scenario, &mut swap, 0, sender);
             assert!(is_object_in_inventory<ItemB>(scenario, ALICE, bob_id1), EObjectNotInInventory);
         };
 
@@ -2998,32 +1191,40 @@ module swop::swop_tests {
     fun swap_fail_counterparty_claim_coin_without_accepting() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, _alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, _alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
         let initiator_sui_coin_offer = 10;
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, sender, initiator_sui_coin_offer);
+            let coin_type_to_receive = type_name::into_string(type_name::get<SUI>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1],
+                0,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty claims nft(s) and coins
             let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<SUI>(scenario, swap_mut, sender);
+            claim_coins_from_offer_<SUI>(scenario, &mut swap, sender);
 
             assert!(
                 get_coins_balance<SUI>(scenario, BOB) == COINS_TO_MINT + initiator_sui_coin_offer,
@@ -3039,40 +1240,48 @@ module swop::swop_tests {
     fun swap_fail_initiator_claim_coin_without_counterparty_accepting() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, _bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, _bob_id1, _bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
         let counter_btc_coin_offer = 20;
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector::empty(),
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
             let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector::empty());
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, sender, alice_id1);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
             let sender = tx_context::sender(ts::ctx(scenario));
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
+            add_coin_to_offer_<BTC>(scenario, swap_db_mut, &mut swap, sender, counter_btc_coin_offer);
         };
 
         ts::next_tx(scenario, ALICE);
         {
             // Initiator claims nft(s) and coins
             let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
+            claim_coins_from_offer_<BTC>(scenario, &mut swap, sender);
 
             assert!(
                 get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
@@ -3083,58 +1292,65 @@ module swop::swop_tests {
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
     }
 
+    // TODO: testing
     // User tries to claim coin twice
     #[test, expected_failure(abort_code = swop::swop::EInsufficientValue)]
     fun swap_fail_user_tries_to_claim_coin_twice() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, _bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, _bob_id1, _bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
         let counter_btc_coin_offer = 20;
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector::empty());
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector::empty(),
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
+        let bob_swap_fee = take_coins<SUI>(scenario, BOB, platform_fee);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
+            add_coin_to_offer_<BTC>(scenario, swap_db_mut, &mut swap, BOB, counter_btc_coin_offer);
 
             // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
+            let receipt = swop::accept<BTC>(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
 
             // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
+            swop::take_fee_from_counterparty(bob_swap_fee, &mut swap, receipt);
         };
 
         // Make sure swap request is no longer in requests & its status equals accepted
-        let swap_id = object::id(swap_mut);
+        let swap_id = object::id(&swap);
         assert!(!swop::is_swap_in_requests(ALICE, swap_id, swap_db_mut), ESwapNotRemovedFromOpenSwaps);
-        assert!(swop::is_swap_accepted(swap_mut), EIncorrectSwapStatus);
+        assert!(swop::is_swap_accepted(&swap), EIncorrectSwapStatus);
 
         ts::next_tx(scenario, ALICE);
         {
             // Initiator claims nft(s) and coins
             let sender = tx_context::sender(ts::ctx(scenario));
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
-            claim_coins_from_offer_<BTC>(scenario, swap_mut, sender);
+            claim_coins_from_offer_<BTC>(scenario, &mut swap, sender);
+            claim_coins_from_offer_<BTC>(scenario, &mut swap, sender);
 
             assert!(
                 get_coins_balance<BTC>(scenario, ALICE) == counter_btc_coin_offer,
@@ -3150,136 +1366,160 @@ module swop::swop_tests {
     fun swap_fail_counterparty_accept_expired_offer() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
         let initiator_sui_coin_offer = 10;
         let counter_btc_coin_offer = 20;
         let swap_valid_duration = 1000000;
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            swop::set_coins_to_receive<BTC>(swap_mut, counter_btc_coin_offer);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id2);
-            add_coin_to_offer_<SUI>(scenario, swap_db_mut, swap_mut, ALICE, initiator_sui_coin_offer);
+            let coin_type_to_receive = type_name::into_string(type_name::get<BTC>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1, bob_id2],
+                counter_btc_coin_offer,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, ALICE, alice_id2);
+            add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, swap_valid_duration, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, swap_valid_duration, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
+        let bob_swap_fee = take_coins<SUI>(scenario, BOB, platform_fee);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
-            let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id2);
-            add_coin_to_offer_<BTC>(scenario, swap_db_mut, swap_mut, sender, counter_btc_coin_offer);
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, BOB, bob_id1);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, BOB, bob_id2);
+            add_coin_to_offer_<BTC>(scenario, swap_db_mut, &mut swap, BOB, counter_btc_coin_offer);
 
             clock::increment_for_testing(&mut clock, swap_valid_duration + 1);
 
             // Counterparty accepts swap request
-            let receipt = swop::accept<BTC>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
+            let receipt = swop::accept<BTC>(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
 
             // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
+            swop::take_fee_from_counterparty(bob_swap_fee, &mut swap, receipt);
         };
 
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
     }
 
+    // TODO: testing
     // Initiator tries to accept offer after counterparty adds assets
     #[test, expected_failure(abort_code = swop::swop::EActionNotAllowed)]
     fun swap_fail_initiator_accept_offer() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, _bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, _bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
+            let coin_type_to_receive = type_name::into_string(type_name::get<SUI>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id2],
+                0,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, sender, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
             let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, sender, bob_id2);
         };
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
             // Initiator tries to accept swap request
-            let receipt = swop::accept<SUI>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
+            let receipt = swop::accept<SUI>(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
 
             // Filler to consume the receipt
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
+            swop::take_fee_from_counterparty(initiator_swap_fee, &mut swap, receipt);
         };
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
     }
 
+    // TODO: testing
     // Counterparty tries to accept offer without adding all nfts
     #[test, expected_failure(abort_code = swop::swop::ESuppliedLengthMismatch)]
     fun swap_fail_counterparty_accept_offer_insufficient_nft_added() {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
-        let (admin_cap, swap_db, swap, clock, alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
+        let (admin_cap, swap_db, clock, alice_id1, _alice_id2, bob_id1, bob_id2) = init_test_env(scenario);
         let swap_db_mut = &mut swap_db;
-        let swap_mut = &mut swap;
         let platform_fee = swop::get_platform_fee(swap_db_mut);
 
+        let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
         {
-            // Initiator sets nft(s) to be received, nft(s) to be swapped
-            let sender = tx_context::sender(ts::ctx(scenario));
-            swop::set_nfts_to_receive(swap_mut, vector[bob_id1, bob_id2]);
-            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, swap_mut, sender, alice_id1);
+            let coin_type_to_receive = type_name::into_string(type_name::get<SUI>());
+            let swap = swop::create_init(
+                swap_db_mut,
+                BOB,
+                vector[bob_id1, bob_id2],
+                0,
+                coin_type_to_receive,
+                ts::ctx(scenario)
+            );
+            add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let receipt = swop::create<SUI>(swap_db_mut, swap_mut, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
 
             // Initiator pays platform fee
-            swop::take_swop_fee(take_coins(scenario, ALICE, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == platform_fee, EIncorrectPlatformFee);
+            swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
         };
+
+        ts::next_tx(scenario, ADMIN);
+        let swap = ts::take_shared<SwapRequest>(scenario);
+        let bob_swap_fee = take_coins<SUI>(scenario, BOB, platform_fee);
 
         ts::next_tx(scenario, BOB);
         {
             // Counterparty adds nft(s) to swap
             let sender = tx_context::sender(ts::ctx(scenario));
-            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, swap_mut, sender, bob_id1);
+            add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap, sender, bob_id2);
 
             // Counterparty accepts swap request
-            let receipt = swop::accept<SUI>(swap_db_mut, swap_mut, &clock, ts::ctx(scenario));
+            let receipt = swop::accept<SUI>(swap_db_mut, &mut swap, &clock, ts::ctx(scenario));
 
             // Counterparty pays platform fee
-            swop::take_swop_fee(take_coins(scenario, BOB, platform_fee), swap_mut, receipt);
-            assert!(swop::get_platform_fee_balance(swap_mut) == (platform_fee * 2), EIncorrectPlatformFee);
+            swop::take_fee_from_counterparty(bob_swap_fee, &mut swap, receipt);
         };
 
         end_scenario(admin_cap, swap, swap_db, clock, scenario_val);
