@@ -82,14 +82,13 @@ module swop::swop {
 
     struct ClaimTicket {
         swap_id: ID,
-        claimer: address,
-        is_offer_empty: bool
+        claimer: address
     }
 
     /// Events
     struct ActionEvent has copy, drop {
         swap_id: ID,
-        status: u64,
+        status: u64
     }
 
     struct ClaimEvent has copy, drop {
@@ -337,22 +336,24 @@ module swop::swop {
         coin::take(&mut swap.platform_fee_balance, platform_fee_value, ctx)
     }
 
-    public fun claim_init<CoinType>(swap: &mut SwapRequest, ctx: &mut TxContext): ClaimTicket {
+    public fun claim_init(swap: &mut SwapRequest, ctx: &mut TxContext): ClaimTicket {
         let sender = tx_context::sender(ctx);
         assert!(
             (sender == swap.initiator && swap.status != SWAP_STATUS_PENDING_COUNTERPARTY) ||
                 (sender == swap.counterparty && swap.status == SWAP_STATUS_ACCEPTED),
             EActionNotAllowed
         );
-        ClaimTicket { swap_id: object::id(swap), claimer: sender, is_offer_empty: false }
+        ClaimTicket { swap_id: object::id(swap), claimer: sender }
     }
 
-    public fun claim_nft_from_offer<T: key+store, CoinType>(
+    public fun claim_nft_from_offer<T: key+store>(
         claim_ticket: ClaimTicket,
         swap: &mut SwapRequest,
         item_key: u64,
         ctx: &mut TxContext
     ): (T, ClaimTicket) {
+        assert!(claim_ticket.swap_id == object::id(swap), EActionNotAllowed);
+
         let sender = tx_context::sender(ctx);
         let offer = {
             if (swap.status == SWAP_STATUS_ACCEPTED) {
@@ -367,7 +368,6 @@ module swop::swop {
         };
         assert!(!bag::is_empty(&offer.escrowed_nfts), EActionNotAllowed);
         let nft: T = bag::remove(&mut offer.escrowed_nfts, item_key);
-        claim_ticket.is_offer_empty = is_offer_empty<CoinType>(offer);
         (nft, claim_ticket)
     }
 
@@ -376,6 +376,8 @@ module swop::swop {
         swap: &mut SwapRequest,
         ctx: &mut TxContext
     ): (Coin<CoinType>, ClaimTicket) {
+        assert!(object::id(swap) == claim_ticket.swap_id, EActionNotAllowed);
+
         let sender = tx_context::sender(ctx);
         let offer = {
             if (swap.status == SWAP_STATUS_ACCEPTED) {
@@ -397,13 +399,28 @@ module swop::swop {
         let current_balance = balance::value(escrowed_balance_wrapper);
         assert!(current_balance > 0, EInsufficientValue);
         let coin = coin::take(escrowed_balance_wrapper, current_balance, ctx);
-        claim_ticket.is_offer_empty = is_offer_empty<CoinType>(offer);
         (coin, claim_ticket)
     }
 
-    public fun resolve_claim<CoinType>(claim_ticket: ClaimTicket) {
-        assert!(claim_ticket.is_offer_empty, EActionNotAllowed);
-        let ClaimTicket { swap_id, claimer, is_offer_empty: _ } = claim_ticket;
+    public fun resolve_claim<CoinType>(swap: &mut SwapRequest, claim_ticket: ClaimTicket, ctx: &mut TxContext) {
+        let sender = tx_context::sender(ctx);
+        assert!(object::id(swap) == claim_ticket.swap_id, EActionNotAllowed);
+        assert!(claim_ticket.claimer == sender, EActionNotAllowed);
+
+        let offer = {
+            if (swap.status == SWAP_STATUS_ACCEPTED) {
+                if (sender == swap.counterparty) {
+                    &swap.initiator_offer
+                }else {
+                    &swap.counterparty_offer
+                }
+            }else {
+                &swap.initiator_offer
+            }
+        };
+        assert!(is_offer_empty<CoinType>(offer), EActionNotAllowed);
+
+        let ClaimTicket { swap_id, claimer } = claim_ticket;
 
         event::emit(ClaimEvent { swap_id, claimer });
     }
