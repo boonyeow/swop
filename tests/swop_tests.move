@@ -127,7 +127,7 @@ module swop::swop_tests {
         item_key: u64,
         sender: address
     ): ClaimTicket {
-        let (obj, claim_ticket) = swop::claim_nft_from_offer<T>(claim_ticket,swap_mut, item_key, ts::ctx(scenario));
+        let (obj, claim_ticket) = swop::claim_nft_from_offer<T>(claim_ticket, swap_mut, item_key, ts::ctx(scenario));
         transfer::public_transfer(obj, sender);
         claim_ticket
     }
@@ -138,7 +138,7 @@ module swop::swop_tests {
         swap_mut: &mut SwapRequest,
         sender: address
     ): ClaimTicket {
-        let (coin, claim_ticket) = swop::claim_coins_from_offer<CoinType>(claim_ticket,swap_mut, ts::ctx(scenario));
+        let (coin, claim_ticket) = swop::claim_coins_from_offer<CoinType>(claim_ticket, swap_mut, ts::ctx(scenario));
         transfer::public_transfer(coin, sender);
         claim_ticket
     }
@@ -229,6 +229,7 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
 
@@ -272,8 +273,8 @@ module swop::swop_tests {
             // Initiator claims nft(s) and coins
             let claim_ticket = claim_init(&mut swap, ts::ctx(scenario));
             claim_ticket = claim_nft_from_offer_<ItemA>(scenario, claim_ticket, &mut swap, 0, ALICE);
-            claim_ticket = claim_nft_from_offer_<ItemB>(scenario, claim_ticket,&mut swap, 1, ALICE);
-            claim_ticket = claim_coins_from_offer_<BTC>(scenario, claim_ticket,&mut swap, ALICE);
+            claim_ticket = claim_nft_from_offer_<ItemB>(scenario, claim_ticket, &mut swap, 1, ALICE);
+            claim_ticket = claim_coins_from_offer_<BTC>(scenario, claim_ticket, &mut swap, ALICE);
             resolve_claim<BTC>(&mut swap, claim_ticket, ts::ctx(scenario));
 
             assert!(is_object_in_inventory<ItemA>(scenario, ALICE, bob_id1), EObjectNotInInventory);
@@ -334,6 +335,7 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             // Initiator adds nft(s), coins to be swapped
@@ -363,7 +365,7 @@ module swop::swop_tests {
             transfer::public_transfer(coin, sender);
 
             let claim_ticket = claim_init(&mut swap, ts::ctx(scenario));
-            claim_ticket = claim_coins_from_offer_<SUI>(scenario, claim_ticket,&mut swap, sender);
+            claim_ticket = claim_coins_from_offer_<SUI>(scenario, claim_ticket, &mut swap, sender);
             resolve_claim<SUI>(&mut swap, claim_ticket, ts::ctx(scenario));
         };
 
@@ -400,6 +402,7 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             // Initiator adds nft(s), coins to be swapped
@@ -430,7 +433,7 @@ module swop::swop_tests {
             transfer::public_transfer(coin, sender);
 
             let claim_ticket = claim_init(&mut swap, ts::ctx(scenario));
-            claim_ticket = claim_coins_from_offer_<SUI>(scenario, claim_ticket,&mut swap, sender);
+            claim_ticket = claim_coins_from_offer_<SUI>(scenario, claim_ticket, &mut swap, sender);
             resolve_claim<SUI>(&mut swap, claim_ticket, ts::ctx(scenario));
         };
 
@@ -449,6 +452,7 @@ module swop::swop_tests {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
 
+        let clock = clock::create_for_testing(ts::ctx(scenario));
         let swap_db = take_swop_db(scenario);
 
         let type_name = type_name::into_string(type_name::get<SUI>());
@@ -458,8 +462,11 @@ module swop::swop_tests {
             vector::empty(),
             0,
             type_name,
+            &clock,
             ts::ctx(scenario)
         );
+
+        clock::destroy_for_testing(clock);
         transfer::public_share_object(swap);
         ts::return_shared(swap_db);
         ts::end(scenario_val);
@@ -472,6 +479,7 @@ module swop::swop_tests {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
 
+        let clock = clock::create_for_testing(ts::ctx(scenario));
         let swap_db = take_swop_db(scenario);
 
         let type_name = type_name::into_string(type_name::get<ETH>());
@@ -481,8 +489,11 @@ module swop::swop_tests {
             vector::singleton(object::id_from_address(@0x400)),
             0,
             type_name,
+            &clock,
             ts::ctx(scenario)
         );
+
+        clock::destroy_for_testing(clock);
         transfer::public_share_object(swap);
         ts::return_shared(swap_db);
         ts::end(scenario_val);
@@ -494,6 +505,7 @@ module swop::swop_tests {
         let scenario_val = ts::begin(ALICE);
         let scenario = &mut scenario_val;
 
+        let clock = clock::create_for_testing(ts::ctx(scenario));
         let swap_db = take_swop_db(scenario);
 
         let type_name = type_name::into_string(type_name::get<SUI>());
@@ -503,10 +515,12 @@ module swop::swop_tests {
             vector::singleton(object::id_from_address(@0x400)),
             0,
             type_name,
+            &clock,
             ts::ctx(scenario)
         );
-        transfer::public_share_object(swap);
 
+        clock::destroy_for_testing(clock);
+        transfer::public_share_object(swap);
         ts::return_shared(swap_db);
         ts::end(scenario_val);
     }
@@ -532,6 +546,7 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -574,6 +589,7 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
 
@@ -634,6 +650,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
@@ -673,6 +690,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -724,6 +742,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -768,6 +787,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -808,6 +828,7 @@ module swop::swop_tests {
                 vector::empty(),
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
@@ -868,6 +889,7 @@ module swop::swop_tests {
                 vector[bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
@@ -926,6 +948,7 @@ module swop::swop_tests {
                 vector[bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             // Initiator adds nft(s), coins to be swapped
@@ -981,6 +1004,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -1038,6 +1062,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
 
@@ -1075,6 +1100,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -1127,6 +1153,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -1146,7 +1173,7 @@ module swop::swop_tests {
             // Counterparty claims nft(s)
             let sender = tx_context::sender(ts::ctx(scenario));
             let claim_ticket = claim_init(&mut swap, ts::ctx(scenario));
-            claim_ticket = claim_nft_from_offer_<ItemA>(scenario, claim_ticket,&mut swap, 0, sender);
+            claim_ticket = claim_nft_from_offer_<ItemA>(scenario, claim_ticket, &mut swap, 0, sender);
             resolve_claim<SUI>(&mut swap, claim_ticket, ts::ctx(scenario));
             assert!(is_object_in_inventory<ItemA>(scenario, BOB, alice_id1), EObjectNotInInventory);
         };
@@ -1173,6 +1200,7 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
@@ -1229,6 +1257,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
@@ -1280,6 +1309,7 @@ module swop::swop_tests {
                 vector::empty(),
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             let sender = tx_context::sender(ts::ctx(scenario));
@@ -1307,7 +1337,7 @@ module swop::swop_tests {
             // Initiator claims nft(s) and coins
             let sender = tx_context::sender(ts::ctx(scenario));
             let claim_ticket = claim_init(&mut swap, ts::ctx(scenario));
-            claim_ticket = claim_coins_from_offer_<BTC>(scenario, claim_ticket,&mut swap, sender);
+            claim_ticket = claim_coins_from_offer_<BTC>(scenario, claim_ticket, &mut swap, sender);
             resolve_claim<SUI>(&mut swap, claim_ticket, ts::ctx(scenario));
 
             assert!(
@@ -1339,6 +1369,7 @@ module swop::swop_tests {
                 vector::empty(),
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -1404,6 +1435,7 @@ module swop::swop_tests {
                 vector::empty(),
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -1476,6 +1508,7 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -1532,6 +1565,7 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -1585,6 +1619,7 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -1635,6 +1670,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap1, ALICE, alice_id1);
@@ -1659,6 +1695,7 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap2, ALICE, alice_id2);
@@ -1739,6 +1776,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap1, ALICE, alice_id1);
@@ -1763,6 +1801,7 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap2, ALICE, alice_id2);
@@ -1843,6 +1882,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap1, ALICE, alice_id1);
@@ -1867,6 +1907,7 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap2, ALICE, alice_id2);
@@ -1946,6 +1987,7 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
+                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);

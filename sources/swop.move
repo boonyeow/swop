@@ -43,6 +43,8 @@ module swop::swop {
     const SWAP_INITIATOR: u8 = 0;
     const SWAP_COUNTERPARTY: u8 = 1;
 
+    const OFFER_VALIDITY: u64 = 1000 * 60 * 60 * 24 * 7; // 7 days
+
     struct SwapDB has key, store {
         id: UID,
         registry: Table<address, UID>,
@@ -118,6 +120,7 @@ module swop::swop {
         nfts_to_receive: vector<ID>,
         coins_to_receive: u64,
         coin_type_to_receive: String,
+        clock: &Clock,
         ctx: &mut TxContext
     ): SwapRequest {
         assert!(swap_db.version == VERSION, EWrongVersion);
@@ -144,7 +147,7 @@ module swop::swop {
             initiator_offer,
             counterparty_offer,
             status: SWAP_STATUS_PENDING_INITIATOR,
-            expiry: 0,
+            expiry: clock::timestamp_ms(clock) + OFFER_VALIDITY,
             platform_fee_balance: balance::zero(),
             version: VERSION
         };
