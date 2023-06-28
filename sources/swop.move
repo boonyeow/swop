@@ -120,7 +120,6 @@ module swop::swop {
         nfts_to_receive: vector<ID>,
         coins_to_receive: u64,
         coin_type_to_receive: String,
-        clock: &Clock,
         ctx: &mut TxContext
     ): SwapRequest {
         assert!(swap_db.version == VERSION, EWrongVersion);
@@ -147,7 +146,7 @@ module swop::swop {
             initiator_offer,
             counterparty_offer,
             status: SWAP_STATUS_PENDING_INITIATOR,
-            expiry: clock::timestamp_ms(clock) + OFFER_VALIDITY,
+            expiry: 0,
             platform_fee_balance: balance::zero(),
             version: VERSION
         };
@@ -254,7 +253,6 @@ module swop::swop {
         swap_db: &mut SwapDB,
         swap: SwapRequest,
         clock: &Clock,
-        valid_for: u64,
         ctx: &mut TxContext
     ): (Receipt, SwapRequest) {
         assert!(swap_db.version == VERSION && swap.version == VERSION, EWrongVersion);
@@ -267,7 +265,7 @@ module swop::swop {
         let type_name = type_name::into_string(type_name::get<CoinType>());
         field::add(&mut swap.counterparty_offer.escrowed_balance_wrapper, type_name, balance::zero<CoinType>());
 
-        swap.expiry = clock::timestamp_ms(clock) + valid_for;
+        swap.expiry = clock::timestamp_ms(clock) + OFFER_VALIDITY;
         swap.status = SWAP_STATUS_PENDING_COUNTERPARTY;
 
         // Add swap to open requests

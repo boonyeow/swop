@@ -229,7 +229,6 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
 
@@ -239,7 +238,7 @@ module swop::swop_tests {
             add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -335,14 +334,13 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             // Initiator adds nft(s), coins to be swapped
             add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -391,7 +389,7 @@ module swop::swop_tests {
 
         let counter_btc_coin_offer = 20;
 
-        let swap_valid_duration = 1000000;
+        let swap_valid_duration = 1000 * 60 * 60 * 24 * 7;
 
         ts::next_tx(scenario, ALICE);
         {
@@ -402,14 +400,13 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             // Initiator adds nft(s), coins to be swapped
             add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, swap_valid_duration, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -462,7 +459,6 @@ module swop::swop_tests {
             vector::empty(),
             0,
             type_name,
-            &clock,
             ts::ctx(scenario)
         );
 
@@ -489,7 +485,6 @@ module swop::swop_tests {
             vector::singleton(object::id_from_address(@0x400)),
             0,
             type_name,
-            &clock,
             ts::ctx(scenario)
         );
 
@@ -515,7 +510,6 @@ module swop::swop_tests {
             vector::singleton(object::id_from_address(@0x400)),
             0,
             type_name,
-            &clock,
             ts::ctx(scenario)
         );
 
@@ -546,14 +540,13 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
             add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -589,7 +582,6 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
 
@@ -597,7 +589,7 @@ module swop::swop_tests {
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -650,7 +642,6 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
@@ -659,7 +650,7 @@ module swop::swop_tests {
 
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -690,13 +681,12 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -742,13 +732,12 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -787,7 +776,6 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -795,7 +783,7 @@ module swop::swop_tests {
             add_coin_to_offer_<ETH>(scenario, swap_db_mut, &mut swap, ALICE, initiator_eth_coin_offer);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -828,7 +816,6 @@ module swop::swop_tests {
                 vector::empty(),
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
@@ -836,7 +823,7 @@ module swop::swop_tests {
             add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -889,7 +876,6 @@ module swop::swop_tests {
                 vector[bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
@@ -897,7 +883,7 @@ module swop::swop_tests {
             add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -948,14 +934,13 @@ module swop::swop_tests {
                 vector[bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             // Initiator adds nft(s), coins to be swapped
             add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1004,14 +989,13 @@ module swop::swop_tests {
                 vector[bob_id1],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
             add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1062,12 +1046,11 @@ module swop::swop_tests {
                 vector[bob_id1],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1100,13 +1083,12 @@ module swop::swop_tests {
                 vector[bob_id1],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1153,13 +1135,12 @@ module swop::swop_tests {
                 vector[bob_id1],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1200,14 +1181,13 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             // Initiator sets nft(s) to be received, nft(s) to be swapped
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1257,13 +1237,12 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1309,14 +1288,13 @@ module swop::swop_tests {
                 vector::empty(),
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             let sender = tx_context::sender(ts::ctx(scenario));
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, sender, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1369,13 +1347,12 @@ module swop::swop_tests {
                 vector::empty(),
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1435,13 +1412,12 @@ module swop::swop_tests {
                 vector::empty(),
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1496,7 +1472,7 @@ module swop::swop_tests {
         let platform_fee = swop::get_platform_fee(swap_db_mut);
         let initiator_sui_coin_offer = 10;
         let counter_btc_coin_offer = 20;
-        let swap_valid_duration = 1000000;
+        let swap_valid_duration = 1000 * 60 * 60 * 24 * 7;
 
         let initiator_swap_fee = take_coins<SUI>(scenario, ALICE, platform_fee);
         ts::next_tx(scenario, ALICE);
@@ -1508,7 +1484,6 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 counter_btc_coin_offer,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
@@ -1516,7 +1491,7 @@ module swop::swop_tests {
             add_coin_to_offer_<SUI>(scenario, swap_db_mut, &mut swap, ALICE, initiator_sui_coin_offer);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, swap_valid_duration, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1565,13 +1540,12 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1619,13 +1593,12 @@ module swop::swop_tests {
                 vector[bob_id1, bob_id2],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap, receipt);
@@ -1670,13 +1643,12 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap1, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap1) = swop::create<SUI>(swap_db_mut, swap1, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap1) = swop::create<SUI>(swap_db_mut, swap1, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee1, swap1, receipt);
@@ -1695,13 +1667,12 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap2, ALICE, alice_id2);
 
             // Initiator creates swap
-            let (receipt, swap2) = swop::create<SUI>(swap_db_mut, swap2, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap2) = swop::create<SUI>(swap_db_mut, swap2, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee2, swap2, receipt);
@@ -1776,13 +1747,12 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap1, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap1) = swop::create<SUI>(swap_db_mut, swap1, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap1) = swop::create<SUI>(swap_db_mut, swap1, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee1, swap1, receipt);
@@ -1801,13 +1771,12 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap2, ALICE, alice_id2);
 
             // Initiator creates swap
-            let (receipt, swap2) = swop::create<SUI>(swap_db_mut, swap2, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap2) = swop::create<SUI>(swap_db_mut, swap2, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee2, swap2, receipt);
@@ -1882,13 +1851,12 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap1, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap1) = swop::create<SUI>(swap_db_mut, swap1, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap1) = swop::create<SUI>(swap_db_mut, swap1, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee1, swap1, receipt);
@@ -1907,13 +1875,12 @@ module swop::swop_tests {
                 vector[bob_id2],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemB>(scenario, swap_db_mut, &mut swap2, ALICE, alice_id2);
 
             // Initiator creates swap
-            let (receipt, swap2) = swop::create<SUI>(swap_db_mut, swap2, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap2) = swop::create<SUI>(swap_db_mut, swap2, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee2, swap2, receipt);
@@ -1987,13 +1954,12 @@ module swop::swop_tests {
                 vector[bob_id1],
                 0,
                 coin_type_to_receive,
-                &clock,
                 ts::ctx(scenario)
             );
             add_nft_to_offer_<ItemA>(scenario, swap_db_mut, &mut swap, ALICE, alice_id1);
 
             // Initiator creates swap
-            let (receipt, swap1) = swop::create<SUI>(swap_db_mut, swap, &clock, 1000000, ts::ctx(scenario));
+            let (receipt, swap1) = swop::create<SUI>(swap_db_mut, swap, &clock, ts::ctx(scenario));
 
             // Initiator pays platform fee
             swop::take_fee_from_initiator(initiator_swap_fee, swap1, receipt);
